@@ -76,7 +76,7 @@ do_test intpkey-1.6 {
      INSERT INTO t1 VALUES(5,'second','entry');
   }} msg]
   lappend r $msg
-} {1 {PRIMARY KEY must be unique}}
+} {1 {UNIQUE constraint failed: t1.a}}
 do_test intpkey-1.7 {
   execsql {
     SELECT rowid, * FROM t1;
@@ -125,8 +125,11 @@ do_test intpkey-1.12.1 {
   }
 } {4 one two}
 do_test intpkey-1.12.2 {
-  set sqlite_query_plan
-} {t1 *}
+  execsql {
+    EXPLAIN QUERY PLAN
+    SELECT * FROM t1 WHERE a==4;
+  }
+} {/SEARCH TABLE t1 /}
 
 # Try to insert a non-integer value into the primary key field.  This
 # should result in a data type mismatch.
@@ -293,7 +296,7 @@ do_test intpkey-3.8 {
   count {
     SELECT * FROM t1 WHERE c=='world' AND a>7;
   }
-} {11 hello world 4}
+} {11 hello world 3}
 do_test intpkey-3.9 {
   count {
     SELECT * FROM t1 WHERE 7<a;
@@ -376,7 +379,7 @@ do_test intpkey-5.1 {
 } {0 zero entry 0}
 do_test intpkey-5.2 {
   execsql {
-    SELECT rowid, a FROM t1
+    SELECT rowid, a FROM t1 ORDER BY rowid
   }
 } {-4 -4 0 0 5 5 6 6 11 11}
 
@@ -601,5 +604,42 @@ do_test intpkey-15.7 {
   }
 } {}
 
+# 2016-04-18 ticket https://www.sqlite.org/src/tktview/7d7525cb01b68712495d3a
+# Be sure to escape quoted typenames.
+#
+do_execsql_test intpkey-16.0 {
+  CREATE TABLE t16a(id "INTEGER" PRIMARY KEY AUTOINCREMENT, b [TEXT], c `INT`);
+} {}
+do_execsql_test intpkey-16.1 {
+  PRAGMA table_info=t16a;
+} {0 id INTEGER 0 {} 1 1 b TEXT 0 {} 0 2 c INT 0 {} 0}
+
+# 2016-05-06 ticket https://www.sqlite.org/src/tktview/16c9801ceba4923939085
+# When the schema contains an index on the IPK and no other index
+# and a WHERE clause on a delete uses an OR where both sides referencing
+# the IPK, then it is possible that the OP_Delete will fail because there
+# deferred seek of the OP_Seek is not resolved prior to reaching the OP_Delete.
+#
+do_execsql_test intpkey-17.0 {
+  CREATE TABLE t17(x INTEGER PRIMARY KEY, y TEXT);
+  INSERT INTO t17(x,y) VALUES(123,'elephant'),(248,'giraffe');
+  CREATE INDEX t17x ON t17(x);
+  DELETE FROM t17 WHERE x=99 OR x<130;
+  SELECT * FROM t17;
+} {248 giraffe}
+do_execsql_test intpkey-17.1 {
+  DROP INDEX t17x;
+  DELETE FROM t17;
+  INSERT INTO t17(x,y) VALUES(123,'elephant'),(248,'giraffe');
+  CREATE UNIQUE INDEX t17x ON t17(abs(x));
+  DELETE FROM t17 WHERE abs(x) IS NULL OR abs(x)<130;
+  SELECT * FROM t17;
+} {248 giraffe}
+do_execsql_test intpkey-17.2 {
+  DELETE FROM t17;
+  INSERT INTO t17(x,y) VALUES(123,'elephant'),(248,'giraffe');
+  UPDATE t17 SET y='ostrich' WHERE abs(x)=248;
+  SELECT * FROM t17 ORDER BY +x;
+} {123 elephant 248 ostrich}
 
 finish_test

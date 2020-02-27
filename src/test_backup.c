@@ -13,15 +13,24 @@
 **
 */
 
-#include "tcl.h"
-#include <sqlite3.h>
+#if defined(INCLUDE_SQLITE_TCL_H)
+#  include "sqlite_tcl.h"
+#else
+#  include "tcl.h"
+#  ifndef SQLITE_TCLAPI
+#    define SQLITE_TCLAPI
+#  endif
+#endif
+#include "sqlite3.h"
 #include <assert.h>
 
-/* These functions are implemented in test1.c. */
-int getDbPointer(Tcl_Interp *, const char *, sqlite3 **);
-const char *sqlite3TestErrorName(int);
+/* These functions are implemented in main.c. */
+extern const char *sqlite3ErrName(int);
 
-static int backupTestCmd(
+/* These functions are implemented in test1.c. */
+extern int getDbPointer(Tcl_Interp *, const char *, sqlite3 **);
+
+static int SQLITE_TCLAPI backupTestCmd(
   ClientData clientData, 
   Tcl_Interp *interp, 
   int objc,
@@ -70,7 +79,7 @@ static int backupTestCmd(
       Tcl_DeleteCommand(interp, zCmdName);
 
       rc = sqlite3_backup_finish(p);
-      Tcl_SetResult(interp, (char *)sqlite3TestErrorName(rc), TCL_STATIC);
+      Tcl_SetResult(interp, (char *)sqlite3ErrName(rc), TCL_STATIC);
       break;
     }
 
@@ -80,7 +89,7 @@ static int backupTestCmd(
         return TCL_ERROR;
       }
       rc = sqlite3_backup_step(p, nPage);
-      Tcl_SetResult(interp, (char *)sqlite3TestErrorName(rc), TCL_STATIC);
+      Tcl_SetResult(interp, (char *)sqlite3ErrName(rc), TCL_STATIC);
       break;
     }
 
@@ -96,7 +105,7 @@ static int backupTestCmd(
   return TCL_OK;
 }
 
-static void backupTestFinish(ClientData clientData){
+static void SQLITE_TCLAPI backupTestFinish(ClientData clientData){
   sqlite3_backup *pBackup = (sqlite3_backup *)clientData;
   sqlite3_backup_finish(pBackup);
 }
@@ -105,7 +114,7 @@ static void backupTestFinish(ClientData clientData){
 **     sqlite3_backup CMDNAME DESTHANDLE DESTNAME SRCHANDLE SRCNAME
 **
 */
-static int backupTestInit(
+static int SQLITE_TCLAPI backupTestInit(
   ClientData clientData, 
   Tcl_Interp *interp, 
   int objc,

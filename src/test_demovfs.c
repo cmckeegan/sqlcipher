@@ -115,7 +115,7 @@
 
 #if !defined(SQLITE_TEST) || SQLITE_OS_UNIX
 
-#include <sqlite3.h>
+#include "sqlite3.h"
 
 #include <assert.h>
 #include <string.h>
@@ -240,6 +240,9 @@ static int demoRead(
   if( nRead==iAmt ){
     return SQLITE_OK;
   }else if( nRead>=0 ){
+    if( nRead<iAmt ){
+      memset(&((char*)zBuf)[nRead], 0, iAmt-nRead);
+    }
     return SQLITE_IOERR_SHORT_READ;
   }
 
@@ -369,7 +372,7 @@ static int demoCheckReservedLock(sqlite3_file *pFile, int *pResOut){
 ** No xFileControl() verbs are implemented by this VFS.
 */
 static int demoFileControl(sqlite3_file *pFile, int op, void *pArg){
-  return SQLITE_OK;
+  return SQLITE_NOTFOUND;
 }
 
 /*
@@ -536,7 +539,7 @@ static int demoFullPathname(
   if( zPath[0]=='/' ){
     zDir[0] = '\0';
   }else{
-    getcwd(zDir, sizeof(zDir));
+    if( getcwd(zDir, sizeof(zDir))==0 ) return SQLITE_IOERR;
   }
   zDir[MAXPATHNAME] = '\0';
 
@@ -641,10 +644,17 @@ sqlite3_vfs *sqlite3_demovfs(void){
 
 #ifdef SQLITE_TEST
 
-#include <tcl.h>
+#if defined(INCLUDE_SQLITE_TCL_H)
+#  include "sqlite_tcl.h"
+#else
+#  include "tcl.h"
+#  ifndef SQLITE_TCLAPI
+#    define SQLITE_TCLAPI
+#  endif
+#endif
 
 #if SQLITE_OS_UNIX
-static int register_demovfs(
+static int SQLITE_TCLAPI register_demovfs(
   ClientData clientData, /* Pointer to sqlite3_enable_XXX function */
   Tcl_Interp *interp,    /* The TCL interpreter that invoked this command */
   int objc,              /* Number of arguments */
@@ -653,7 +663,7 @@ static int register_demovfs(
   sqlite3_vfs_register(sqlite3_demovfs(), 1);
   return TCL_OK;
 }
-static int unregister_demovfs(
+static int SQLITE_TCLAPI unregister_demovfs(
   ClientData clientData, /* Pointer to sqlite3_enable_XXX function */
   Tcl_Interp *interp,    /* The TCL interpreter that invoked this command */
   int objc,              /* Number of arguments */

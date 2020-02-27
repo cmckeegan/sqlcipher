@@ -39,8 +39,8 @@ SQLite. Documentation follows.
     To utilise "general" case mapping, the upper() or lower() scalar 
     functions are invoked with one argument:
 
-        upper('ABC') -> 'abc'
-        lower('abc') -> 'ABC'
+        upper('abc') -> 'ABC'
+        lower('ABC') -> 'abc'
 
     To access ICU "language specific" case mapping, upper() or lower()
     should be invoked with two arguments. The second argument is the name
@@ -98,7 +98,7 @@ SQLite. Documentation follows.
         <string> REGEXP <re-pattern>
 
     This extension uses the ICU defaults for regular expression matching
-    behaviour. Specifically, this means that:
+    behavior. Specifically, this means that:
 
         * Matching is case-sensitive,
         * Regular expression comments are not allowed within patterns, and

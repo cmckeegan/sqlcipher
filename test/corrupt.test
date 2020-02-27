@@ -25,6 +25,10 @@ source $testdir/tester.tcl
 #
 do_not_use_codec
 
+# These tests deal with corrupt database files
+#
+database_may_be_corrupt
+
 # Construct a large database for testing.
 #
 do_test corrupt-1.1 {
@@ -128,6 +132,7 @@ do_test corrupt-3.2 {
   set t1_r [execsql {SELECT rootpage FROM sqlite_master WHERE name = 't1i1'}]
   set t1i1_r [execsql {SELECT rootpage FROM sqlite_master WHERE name = 't1'}]
   set cookie [expr [execsql {PRAGMA schema_version}] + 1]
+  sqlite3_db_config db DEFENSIVE 0
   execsql "
     PRAGMA writable_schema = 1;
     UPDATE sqlite_master SET rootpage = $t1_r WHERE name = 't1';

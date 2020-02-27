@@ -15,18 +15,20 @@
 
 proc do_multiclient_test {varname script} {
 
-  foreach code [list {
+  foreach {tn code} [list 1 {
     if {[info exists ::G(valgrind)]} { db close ; continue }
     set ::code2_chan [launch_testfixture]
     set ::code3_chan [launch_testfixture]
     proc code2 {tcl} { testfixture $::code2_chan $tcl }
     proc code3 {tcl} { testfixture $::code3_chan $tcl }
-    set tn 1
-  } {
+  } 2 {
     proc code2 {tcl} { uplevel #0 $tcl }
     proc code3 {tcl} { uplevel #0 $tcl }
-    set tn 2
   }] {
+    # Do not run multi-process tests with the unix-excl VFS.
+    #
+    if {$tn==1 && [permutation]=="unix-excl"} continue
+
     faultsim_delete_and_reopen
 
     proc code1 {tcl} { uplevel #0 $tcl }
@@ -86,21 +88,51 @@ proc launch_testfixture {{prg ""}} {
 # Execute a command in a child testfixture process, connected by two-way
 # channel $chan. Return the result of the command, or an error message.
 #
-proc testfixture {chan cmd} {
-  puts $chan $cmd
-  puts $chan OVER
-  set r ""
-  while { 1 } {
+proc testfixture {chan cmd args} {
+
+  if {[llength $args] == 0} {
+    fconfigure $chan -blocking 1
+    puts $chan $cmd
+    puts $chan OVER
+
+    set r ""
+    while { 1 } {
+      set line [gets $chan]
+      if { $line == "OVER" } { 
+        set res [lindex $r 1]
+        if { [lindex $r 0] } { error $res }
+        return $res
+      }
+      if {[eof $chan]} {
+        return "ERROR: Child process hung up"
+      }
+      append r $line
+    }
+    return $r
+  } else {
+    set ::tfnb($chan) ""
+    fconfigure $chan -blocking 0 -buffering none
+    puts $chan $cmd
+    puts $chan OVER
+    fileevent $chan readable [list testfixture_script_cb $chan [lindex $args 0]]
+    return ""
+  }
+}
+
+proc testfixture_script_cb {chan script} {
+  if {[eof $chan]} {
+    append ::tfnb($chan) "ERROR: Child process hung up"
+    set line "OVER"
+  } else {
     set line [gets $chan]
-    if { $line == "OVER" } { 
-      set res [lindex $r 1]
-      if { [lindex $r 0] } { error $res }
-      return $res
-    }
-    if {[eof $chan]} {
-      return "ERROR: Child process hung up"
-    }
-    append r $line
+  }
+
+  if { $line == "OVER" } {
+    uplevel #0 $script [list [lindex $::tfnb($chan) 1]]
+    unset ::tfnb($chan)
+    fileevent $chan readable ""
+  } else {
+    append ::tfnb($chan) $line
   }
 }
 

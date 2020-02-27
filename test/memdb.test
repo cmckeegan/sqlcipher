@@ -240,7 +240,7 @@ foreach {i conf1 conf2 cmd t0 t1 t2} {
     if {$i>1} break
   }
 
-  if {$t0} {set t1 {column a is not unique}}
+  if {$t0} {set t1 {UNIQUE constraint failed: t1.a}}
   do_test memdb-5.$i {
     if {$conf1!=""} {set conf1 "ON CONFLICT $conf1"}
     if {$conf2!=""} {set conf2 "ON CONFLICT $conf2"}
@@ -365,7 +365,7 @@ do_test memdb-6.15 {
 
 ifcapable subquery&&vtab {
   do_test memdb-7.1 {
-    register_wholenumber_module db
+    load_static_extension db wholenumber
     execsql {
       CREATE TABLE t6(x);
       CREATE VIRTUAL TABLE nums USING wholenumber;
@@ -419,11 +419,10 @@ ifcapable autovacuum {
       INSERT INTO t1 VALUES(randstr(1000,1000));
       INSERT INTO t1 VALUES(randstr(1000,1000));
     }
-    set memused [lindex [sqlite3_status SQLITE_STATUS_MEMORY_USED 0] 1]
-    set pgovfl [lindex [sqlite3_status SQLITE_STATUS_PAGECACHE_OVERFLOW 0] 1]
+    set before [db one {PRAGMA page_count}]
     execsql { DELETE FROM t1 }
-    set memused2 [lindex [sqlite3_status SQLITE_STATUS_MEMORY_USED 0] 1]
-    expr {($memused2 + 2048 < $memused) || $pgovfl==0}
+    set after [db one {PRAGMA page_count}]
+    expr {$before>$after}
   } {1}
 }
 

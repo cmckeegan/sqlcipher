@@ -123,7 +123,13 @@ foreach AutoVacuumMode [list 0 1] {
   forcedelete test.db test.db-journal
 
   sqlite3 db test.db
+  execsql "PRAGMA mmap_size = 0"
   execsql "PRAGMA auto_vacuum = $AutoVacuumMode"
+
+  # Extra value added to size answers
+  set ib2_extra 0
+  if {$AutoVacuumMode} {incr ib2_extra}
+  if {[nonzero_reserved_bytes]} {incr ib2_extra}
 
   do_test incrblob-2.$AutoVacuumMode.1 {
     set ::str [string repeat abcdefghij 2900]
@@ -135,7 +141,7 @@ foreach AutoVacuumMode [list 0 1] {
       COMMIT;
     }
     expr [file size test.db]/1024
-  } [expr 31 + $AutoVacuumMode]
+  } [expr 31 + $ib2_extra]
 
   ifcapable autovacuum {
     do_test incrblob-2.$AutoVacuumMode.2 {
@@ -149,6 +155,7 @@ foreach AutoVacuumMode [list 0 1] {
     # Open and close the db to make sure the page cache is empty.
     db close
     sqlite3 db test.db
+    execsql "PRAGMA mmap_size = 0"
   
     # Read the last 20 bytes of the blob via a blob handle.
     set ::blob [db incrblob blobs v 1]
@@ -161,7 +168,7 @@ foreach AutoVacuumMode [list 0 1] {
     # sqlite uses the ptrmap pages to avoid reading the other pages.
     #
     nRead db
-  } [expr $AutoVacuumMode ? 4 : 30]
+  } [expr $AutoVacuumMode ? 4 : 30+$ib2_extra]
 
   do_test incrblob-2.$AutoVacuumMode.4 {
     string range [db one {SELECT v FROM blobs}] end-19 end
@@ -171,6 +178,7 @@ foreach AutoVacuumMode [list 0 1] {
     # Open and close the db to make sure the page cache is empty.
     db close
     sqlite3 db test.db
+    execsql "PRAGMA mmap_size = 0"
   
     # Write the second-to-last 20 bytes of the blob via a blob handle.
     #
@@ -184,7 +192,7 @@ foreach AutoVacuumMode [list 0 1] {
     # sqlite uses the ptrmap pages to avoid reading the other pages.
     #
     nRead db
-  } [expr $AutoVacuumMode ? 4 : 30]
+  } [expr $AutoVacuumMode ? 4 : 30 + $ib2_extra]
 
   # Pages 1 (the write-counter) and 32 (the blob data) were written.
   do_test incrblob-2.$AutoVacuumMode.6 {
@@ -200,13 +208,14 @@ foreach AutoVacuumMode [list 0 1] {
     # Open and close the db to make sure the page cache is empty.
     db close
     sqlite3 db test.db
+    execsql { PRAGMA mmap_size = 0 }
 
     execsql { SELECT i FROM blobs } 
   } {45}
 
   do_test incrblob-2.$AutoVacuumMode.9 {
     nRead db
-  } [expr $AutoVacuumMode ? 4 : 30]
+  } [expr $AutoVacuumMode ? 4 : 30 + $ib2_extra]
 }
 sqlite3_soft_heap_limit $cmdlinearg(soft-heap-limit)
 
@@ -380,7 +389,7 @@ ifcapable vtab {
 ifcapable attach {
   do_test incrblob-5.1 {
     forcedelete test2.db test2.db-journal
-    set ::size [expr [file size [info script]]]
+    set ::size [expr [file size $::cmdlinearg(INFO_SCRIPT)]]
     execsql {
       ATTACH 'test2.db' AS aux;
       CREATE TABLE aux.files(name, text);
@@ -388,16 +397,16 @@ ifcapable attach {
     }
     set fd  [db incrblob aux files text 1]
     fconfigure $fd -translation binary
-    set fd2 [open [info script]]
+    set fd2 [open $::cmdlinearg(INFO_SCRIPT)]
     fconfigure $fd2 -translation binary
     puts -nonewline $fd [read $fd2]
     close $fd
     close $fd2
     set ::text [db one {select text from aux.files}]
     string length $::text
-  } [file size [info script]]
+  } [file size $::cmdlinearg(INFO_SCRIPT)]
   do_test incrblob-5.2 {
-    set fd2 [open [info script]]
+    set fd2 [open $::cmdlinearg(INFO_SCRIPT)]
     fconfigure $fd2 -translation binary
     set ::data [read $fd2]
     close $fd2
@@ -437,7 +446,7 @@ if {[permutation] != "memsubsys1"} {
   } {}
   do_test incrblob-6.2 {
     execsql {
-      SELECT rowid FROM blobs
+      SELECT rowid FROM blobs ORDER BY rowid
     }
   } {1 2 3}
   do_test incrblob-6.3 {
@@ -505,7 +514,7 @@ if {[permutation] != "memsubsys1"} {
 sqlite3_soft_heap_limit $cmdlinearg(soft-heap-limit)
 
 #-----------------------------------------------------------------------
-# The following tests verify the behaviour of the incremental IO
+# The following tests verify the behavior of the incremental IO
 # APIs in the following cases:
 #
 #     7.1 A row that containing an open blob is modified.
@@ -516,7 +525,7 @@ sqlite3_soft_heap_limit $cmdlinearg(soft-heap-limit)
 #     7.3 An INCREMENTAL VACUUM moves an overflow page that is part
 #         of an open blob.
 #
-# In the first case above, correct behaviour is for all subsequent
+# In the first case above, correct behavior is for all subsequent
 # read/write operations on the blob-handle to return SQLITE_ABORT.
 # More accurately, blob-handles are invalidated whenever the table
 # they belong to is written to.
@@ -572,7 +581,7 @@ foreach {tn arg} {1 "" 2 -readonly} {
 
 }
 
-set fd [open [info script]]
+set fd [open $::cmdlinearg(INFO_SCRIPT)]
 fconfigure $fd -translation binary
 set ::data [read $fd 14000]
 close $fd

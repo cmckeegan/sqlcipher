@@ -20,10 +20,6 @@ source $testdir/tester.tcl
 source $testdir/lock_common.tcl
 source $testdir/malloc_common.tcl
 
-# EVIDENCE-OF: R-58875-56087 The IN and NOT IN operators take a single
-# scalar operand on the left and a vector operand on the right formed by
-# an explicit list of zero or more scalars or by a single subquery.
-#
 # EVIDENCE-OF: R-52275-55503 When the right operand is an empty set, the
 # result of IN is false and the result of NOT IN is true, regardless of
 # the left operand and even if the left operand is NULL.
@@ -160,6 +156,10 @@ do_execsql_test tkt-80e031a00f.322 {SELECT 'b' IN t8} 1
 do_execsql_test tkt-80e031a00f.323 {SELECT 'c' NOT IN t8} 0
 do_execsql_test tkt-80e031a00f.324 {SELECT 'c' IN t8n} 1
 do_execsql_test tkt-80e031a00f.325 {SELECT 'd' NOT IN t8n} 0
+do_execsql_test tkt-80e031a00f.326 {SELECT 'a' IN (NULL,'a')} 1
+do_execsql_test tkt-80e031a00f.327 {SELECT 'a' IN (NULL,'b')} {{}}
+do_execsql_test tkt-80e031a00f.328 {SELECT 'a' NOT IN (NULL,'a')} 0
+do_execsql_test tkt-80e031a00f.329 {SELECT 'a' NOT IN (NULL,'b')} {{}}
 #
 # Row 4:
 do_execsql_test tkt-80e031a00f.400 {SELECT 1 IN (2,3,4,null)} {{}}

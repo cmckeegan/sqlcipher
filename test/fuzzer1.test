@@ -23,13 +23,7 @@ ifcapable !vtab {
 }
 
 set ::testprefix fuzzer1
-
-# Test of test code. Only here to make the coverage metric better.
-do_test 0.1 {
-  list [catch { register_fuzzer_module a b c } msg] $msg
-} {1 {wrong # args: should be "register_fuzzer_module DB"}}
-
-register_fuzzer_module db
+load_static_extension db fuzzer
 
 # Check configuration errors.
 #
@@ -1654,51 +1648,6 @@ do_catchsql_test 5.5.4 {
 } {1 {fuzzer: ruleset must be between 0 and 2147483647}}
 
 #-------------------------------------------------------------------------
-# This test uses a fuzzer table with many rules. There is one rule to
-# map each possible two character string, where characters are lower-case
-# letters used in the English language, to all other possible two character
-# strings. In total, (26^4)-(26^2) mappings (the subtracted term represents
-# the no-op mappings discarded automatically by the fuzzer).
-#
-#
-do_execsql_test 6.1.1 {
-  DROP TABLE IF EXISTS x1;
-  DROP TABLE IF EXISTS x1_rules;
-  CREATE TABLE x1_rules(ruleset, cFrom, cTo, cost);
-}
-puts "This test is slow - perhaps around 7 seconds on an average pc"
-do_test 6.1.2 {
-  set LETTERS {a b c d e f g h i j k l m n o p q r s t u v w x y z}
-  set cost 1
-  db transaction {
-    foreach c1 $LETTERS { 
-      foreach c2 $LETTERS { 
-        foreach c3 $LETTERS { 
-          foreach c4 $LETTERS { 
-            db eval {INSERT INTO x1_rules VALUES(0, $c1||$c2, $c3||$c4, $cost)}
-            set cost [expr ($cost%1000) + 1]
-          }
-        }
-      }
-    }
-    db eval {UPDATE x1_rules SET cost = 20 WHERE cost<20 AND cFrom!='xx'}
-  }
-} {}
-
-do_execsql_test 6.2 {
-  SELECT count(*) FROM x1_rules WHERE cTo!=cFrom;
-} [expr 26*26*26*26 - 26*26]
-
-do_execsql_test 6.2.1 {
-  CREATE VIRTUAL TABLE x1 USING fuzzer(x1_rules);
-  SELECT word FROM x1 WHERE word MATCH 'xx' LIMIT 10;
-} {xx hw hx hy hz ia ib ic id ie}
-do_execsql_test 6.2.2 {
-  SELECT cTo FROM x1_rules WHERE cFrom='xx' 
-  ORDER BY cost asc, rowid asc LIMIT 9;
-} {hw hx hy hz ia ib ic id ie}
-
-#-------------------------------------------------------------------------
 # Test using different types of quotes with CREATE VIRTUAL TABLE 
 # arguments.
 #
@@ -1733,36 +1682,41 @@ do_execsql_test 8.1 {
 do_execsql_test 8.2.1 {
   SELECT cFrom, cTo, word 
     FROM x3_rules CROSS JOIN x3 
-    WHERE word MATCH 'a' AND cost=distance AND ruleset=2;
+    WHERE word MATCH 'a' AND cost=distance AND ruleset=2
+    ORDER BY +cTo;
 } {a x x a y y a z z}
 
 do_execsql_test 8.2.2 {
   SELECT cFrom, cTo, word 
     FROM x3 CROSS JOIN x3_rules
-    WHERE word MATCH 'a' AND cost=distance AND ruleset=2;
+    WHERE word MATCH 'a' AND cost=distance AND ruleset=2
+    ORDER BY +cTo DESC
 } {a z z a y y a x x}
 
 do_execsql_test 8.2.3 {
   SELECT cFrom, cTo, word 
     FROM x3_rules, x3 
-    WHERE word MATCH 'a' AND cost=distance AND ruleset=2;
+    WHERE word MATCH 'a' AND cost=distance AND ruleset=2
+    ORDER BY +cTo DESC;
 } {a z z a y y a x x}
 
 do_execsql_test 8.2.4 {
   SELECT cFrom, cTo, word 
     FROM x3, x3_rules
-    WHERE word MATCH 'a' AND cost=distance AND ruleset=2;
+    WHERE word MATCH 'a' AND cost=distance AND ruleset=2
+    ORDER BY +cTo DESC;
 } {a z z a y y a x x}
 
 do_execsql_test 8.2.5 {
   CREATE INDEX i1 ON x3_rules(cost);
   SELECT cFrom, cTo, word 
     FROM x3_rules, x3 
-    WHERE word MATCH 'a' AND cost=distance AND ruleset=2;
+    WHERE word MATCH 'a' AND cost=distance AND ruleset=2
+    ORDER BY +cTo DESC;
 } {a z z a y y a x x}
 
 do_execsql_test 8.2.5 {
-  SELECT word FROM x3_rules, x3 WHERE word MATCH x3_rules.cFrom AND ruleset=2;
+  SELECT word FROM x3_rules, x3 WHERE word MATCH x3_rules.cFrom AND ruleset=2
 } {a z y x a z y x a z y x}
 
 do_execsql_test 8.2.6 {
@@ -1864,5 +1818,3 @@ do_execsql_test 10.3 {
 } {1 21 41 61 81}
 
 finish_test
-
-

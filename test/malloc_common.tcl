@@ -93,6 +93,14 @@ set FAULTSIM(cantopen-persistent) [list      \
   -injectuninstall cantopen_injectuninstall  \
 ]
 
+set FAULTSIM(interrupt) [list                 \
+  -injectinstall   interrupt_injectinstall    \
+  -injectstart     interrupt_injectstart      \
+  -injectstop      interrupt_injectstop       \
+  -injecterrlist   {{1 interrupted} {1 interrupt}}        \
+  -injectuninstall interrupt_injectuninstall  \
+]
+
 
 
 #--------------------------------------------------------------------------
@@ -113,12 +121,16 @@ set FAULTSIM(cantopen-persistent) [list      \
 proc do_faultsim_test {name args} {
   global FAULTSIM
   
-  set DEFAULT(-faults)        [array names FAULTSIM]
+  foreach n [array names FAULTSIM] {
+    if {$n != "interrupt"} {lappend DEFAULT(-faults) $n}
+  }
   set DEFAULT(-prep)          ""
   set DEFAULT(-body)          ""
   set DEFAULT(-test)          ""
   set DEFAULT(-install)       ""
   set DEFAULT(-uninstall)     ""
+  set DEFAULT(-start)          1
+  set DEFAULT(-end)            0
 
   fix_testname name
 
@@ -136,7 +148,8 @@ proc do_faultsim_test {name args} {
   }
 
   set testspec [list -prep $O(-prep) -body $O(-body) \
-      -test $O(-test) -install $O(-install) -uninstall $O(-uninstall)
+      -test $O(-test) -install $O(-install) -uninstall $O(-uninstall) \
+      -start $O(-start) -end $O(-end)
   ]
   foreach f [lsort -unique $faultlist] {
     eval do_one_faultsim_test "$name-$f" $FAULTSIM($f) $testspec
@@ -255,6 +268,22 @@ proc cantopen_injectstop {} {
   shmfault cantopen
 }
 
+# The following procs are used as [do_one_faultsim_test] callbacks 
+# when injecting SQLITE_INTERRUPT error faults into test cases.
+#
+proc interrupt_injectinstall {} {
+}
+proc interrupt_injectuninstall {} {
+}
+proc interrupt_injectstart {iFail} {
+  set ::sqlite_interrupt_count $iFail
+}
+proc interrupt_injectstop {} {
+  set res [expr $::sqlite_interrupt_count<=0]
+  set ::sqlite_interrupt_count 0
+  set res
+}
+
 # This command is not called directly. It is used by the 
 # [faultsim_test_result] command created by [do_faultsim_test] and used
 # by -test scripts.
@@ -263,8 +292,8 @@ proc faultsim_test_result_int {args} {
   upvar testrc testrc testresult testresult testnfail testnfail
   set t [list $testrc $testresult]
   set r $args
-  if { ($testnfail==0 && $t != [lindex $r 0]) || [lsearch $r $t]<0 } {
-    error "nfail=$testnfail rc=$testrc result=$testresult"
+  if { ($testnfail==0 && $t != [lindex $r 0]) || [lsearch -exact $r $t]<0 } {
+    error "nfail=$testnfail rc=$testrc result=$testresult list=$r"
   }
 }
 
@@ -292,6 +321,8 @@ proc faultsim_test_result_int {args} {
 #
 #     -test             Script to execute after -body.
 #
+#     -start            Index of first fault to inject (default 1)
+#
 proc do_one_faultsim_test {testname args} {
 
   set DEFAULT(-injectstart)     "expr"
@@ -304,6 +335,8 @@ proc do_one_faultsim_test {testname args} {
   set DEFAULT(-test)            ""
   set DEFAULT(-install)         ""
   set DEFAULT(-uninstall)       ""
+  set DEFAULT(-start)           1
+  set DEFAULT(-end)             0
 
   array set O [array get DEFAULT]
   array set O $args
@@ -320,7 +353,10 @@ proc do_one_faultsim_test {testname args} {
   eval $O(-install)
 
   set stop 0
-  for {set iFail 1} {!$stop} {incr iFail} {
+  for {set iFail $O(-start)}                        \
+      {!$stop && ($O(-end)==0 || $iFail<=$O(-end))} \
+      {incr iFail}                                  \
+  {
 
     # Evaluate the -prep script.
     #
@@ -383,6 +419,7 @@ proc do_malloc_test {tn args} {
 
   if {[string is integer $tn]} {
     set tn malloc-$tn
+    catch { set tn $::testprefix-$tn }
   }
   if {[info exists ::mallocopts(-start)]} {
     set start $::mallocopts(-start)

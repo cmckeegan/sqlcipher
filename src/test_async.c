@@ -15,7 +15,14 @@
 */
 
 #define TCL_THREADS 
-#include <tcl.h>
+#if defined(INCLUDE_SQLITE_TCL_H)
+#  include "sqlite_tcl.h"
+#else
+#  include "tcl.h"
+#  ifndef SQLITE_TCLAPI
+#    define SQLITE_TCLAPI
+#  endif
+#endif
 
 #ifdef SQLITE_ENABLE_ASYNCIO
 
@@ -23,8 +30,8 @@
 #include "sqlite3.h"
 #include <assert.h>
 
-/* From test1.c */
-const char *sqlite3TestErrorName(int);
+/* From main.c */
+extern const char *sqlite3ErrName(int);
 
 
 struct TestAsyncGlobal {
@@ -36,7 +43,7 @@ TCL_DECLARE_MUTEX(testasync_g_writerMutex);
 /*
 ** sqlite3async_initialize PARENT-VFS ISDEFAULT
 */
-static int testAsyncInit(
+static int SQLITE_TCLAPI testAsyncInit(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -60,7 +67,7 @@ static int testAsyncInit(
 
   rc = sqlite3async_initialize(zParent, isDefault);
   if( rc!=SQLITE_OK ){
-    Tcl_SetObjResult(interp, Tcl_NewStringObj(sqlite3TestErrorName(rc), -1));
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(sqlite3ErrName(rc), -1));
     return TCL_ERROR;
   }
   return TCL_OK;
@@ -69,7 +76,7 @@ static int testAsyncInit(
 /*
 ** sqlite3async_shutdown
 */
-static int testAsyncShutdown(
+static int SQLITE_TCLAPI testAsyncShutdown(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -93,7 +100,7 @@ static Tcl_ThreadCreateType tclWriterThread(ClientData pIsStarted){
 **
 ** Start a new writer thread.
 */
-static int testAsyncStart(
+static int SQLITE_TCLAPI testAsyncStart(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -125,7 +132,7 @@ static int testAsyncStart(
 ** If the current writer thread is set to run forever then this
 ** command would block forever.  To prevent that, an error is returned. 
 */
-static int testAsyncWait(
+static int SQLITE_TCLAPI testAsyncWait(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -151,7 +158,7 @@ static int testAsyncWait(
 /*
 ** sqlite3async_control OPTION ?VALUE?
 */
-static int testAsyncControl(
+static int SQLITE_TCLAPI testAsyncControl(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -208,7 +215,7 @@ static int testAsyncControl(
   }
 
   if( rc!=SQLITE_OK ){
-    Tcl_SetObjResult(interp, Tcl_NewStringObj(sqlite3TestErrorName(rc), -1));
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(sqlite3ErrName(rc), -1));
     return TCL_ERROR;
   }
 

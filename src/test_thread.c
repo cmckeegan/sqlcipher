@@ -16,7 +16,11 @@
 */
 
 #include "sqliteInt.h"
-#include <tcl.h>
+#if defined(INCLUDE_SQLITE_TCL_H)
+#  include "sqlite_tcl.h"
+#else
+#  include "tcl.h"
+#endif
 
 #if SQLITE_THREADSAFE
 
@@ -60,17 +64,19 @@ static Tcl_ObjCmdProc blocking_prepare_v2_proc;
 int Sqlitetest1_Init(Tcl_Interp *);
 int Sqlite3_Init(Tcl_Interp *);
 
+/* Functions from main.c */
+extern const char *sqlite3ErrName(int);
+
 /* Functions from test1.c */
-void *sqlite3TestTextToPtr(const char *);
-const char *sqlite3TestErrorName(int);
-int getDbPointer(Tcl_Interp *, const char *, sqlite3 **);
-int sqlite3TestMakePointerStr(Tcl_Interp *, char *, void *);
-int sqlite3TestErrCode(Tcl_Interp *, sqlite3 *, int);
+extern void *sqlite3TestTextToPtr(const char *);
+extern int getDbPointer(Tcl_Interp *, const char *, sqlite3 **);
+extern int sqlite3TestMakePointerStr(Tcl_Interp *, char *, void *);
+extern int sqlite3TestErrCode(Tcl_Interp *, sqlite3 *, int);
 
 /*
 ** Handler for events of type EvalEvent.
 */
-static int tclScriptEvent(Tcl_Event *evPtr, int flags){
+static int SQLITE_TCLAPI tclScriptEvent(Tcl_Event *evPtr, int flags){
   int rc;
   EvalEvent *p = (EvalEvent *)evPtr;
   rc = Tcl_Eval(p->interp, p->zScript);
@@ -165,7 +171,7 @@ static Tcl_ThreadCreateType tclScriptThread(ClientData pSqlThread){
 **
 **     The caller can wait for the script to terminate using [vwait VARNAME].
 */
-static int sqlthread_spawn(
+static int SQLITE_TCLAPI sqlthread_spawn(
   ClientData clientData,
   Tcl_Interp *interp,
   int objc,
@@ -218,7 +224,7 @@ static int sqlthread_spawn(
 **
 **     NOTE: At the moment, this doesn't work. FIXME.
 */
-static int sqlthread_parent(
+static int SQLITE_TCLAPI sqlthread_parent(
   ClientData clientData,
   Tcl_Interp *interp,
   int objc,
@@ -263,7 +269,7 @@ static int xBusy(void *pArg, int nBusy){
 **     Open a database handle and return the string representation of
 **     the pointer value.
 */
-static int sqlthread_open(
+static int SQLITE_TCLAPI sqlthread_open(
   ClientData clientData,
   Tcl_Interp *interp,
   int objc,
@@ -274,7 +280,7 @@ static int sqlthread_open(
   const char *zFilename;
   sqlite3 *db;
   char zBuf[100];
-  extern void Md5_Register(sqlite3*);
+  extern int Md5_Register(sqlite3*,char**,const sqlite3_api_routines*);
 
   UNUSED_PARAMETER(clientData);
   UNUSED_PARAMETER(objc);
@@ -297,7 +303,7 @@ static int sqlthread_open(
     }
   }
 #endif
-  Md5_Register(db);
+  Md5_Register(db, 0, 0);
   sqlite3_busy_handler(db, xBusy, 0);
   
   if( sqlite3TestMakePointerStr(interp, zBuf, db) ) return TCL_ERROR;
@@ -313,7 +319,7 @@ static int sqlthread_open(
 **     Return the current thread-id (Tcl_GetCurrentThread()) cast to
 **     an integer.
 */
-static int sqlthread_id(
+static int SQLITE_TCLAPI sqlthread_id(
   ClientData clientData,
   Tcl_Interp *interp,
   int objc,
@@ -331,7 +337,7 @@ static int sqlthread_id(
 /*
 ** Dispatch routine for the sub-commands of [sqlthread].
 */
-static int sqlthread_proc(
+static int SQLITE_TCLAPI sqlthread_proc(
   ClientData clientData,
   Tcl_Interp *interp,
   int objc,
@@ -379,7 +385,7 @@ static int sqlthread_proc(
 ** implemented as a script in Tcl 8.5, it is not usually available to
 ** testfixture.
 */ 
-static int clock_seconds_proc(
+static int SQLITE_TCLAPI clock_seconds_proc(
   ClientData clientData,
   Tcl_Interp *interp,
   int objc,
@@ -541,7 +547,7 @@ int sqlite3_blocking_prepare_v2(
 **
 ** Advance the statement to the next row.
 */
-static int blocking_step_proc(
+static int SQLITE_TCLAPI blocking_step_proc(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -559,7 +565,7 @@ static int blocking_step_proc(
   pStmt = (sqlite3_stmt*)sqlite3TestTextToPtr(Tcl_GetString(objv[1]));
   rc = sqlite3_blocking_step(pStmt);
 
-  Tcl_SetResult(interp, (char *)sqlite3TestErrorName(rc), 0);
+  Tcl_SetResult(interp, (char *)sqlite3ErrName(rc), 0);
   return TCL_OK;
 }
 
@@ -567,7 +573,7 @@ static int blocking_step_proc(
 ** Usage: sqlite3_blocking_prepare_v2 DB sql bytes ?tailvar?
 ** Usage: sqlite3_nonblocking_prepare_v2 DB sql bytes ?tailvar?
 */
-static int blocking_prepare_v2_proc(
+static int SQLITE_TCLAPI blocking_prepare_v2_proc(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -606,7 +612,7 @@ static int blocking_prepare_v2_proc(
   }
   if( rc!=SQLITE_OK ){
     assert( pStmt==0 );
-    sprintf(zBuf, "%s ", (char *)sqlite3TestErrorName(rc));
+    sqlite3_snprintf(sizeof(zBuf), zBuf, "%s ", (char *)sqlite3ErrName(rc));
     Tcl_AppendResult(interp, zBuf, sqlite3_errmsg(db), 0);
     return TCL_ERROR;
   }

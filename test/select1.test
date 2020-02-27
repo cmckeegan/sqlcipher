@@ -307,6 +307,9 @@ do_test select1-4.4 {
   set v [catch {execsql {SELECT f1 FROM test1 ORDER BY min(f1)}} msg]
   lappend v $msg
 } {1 {misuse of aggregate: min()}}
+do_catchsql_test select1-4.5 {
+  INSERT INTO test1(f1) SELECT f1 FROM test1 ORDER BY min(f1);
+} {1 {misuse of aggregate: min()}}
 
 # The restriction not allowing constants in the ORDER BY clause
 # has been removed.  See ticket #1768
@@ -542,9 +545,9 @@ do_test select1-6.9.7 {
   set x [execsql2 {
      SELECT * FROM test1 a, (select 5, 6) LIMIT 1
   }]
-  regsub -all {subquery_[0-9a-fA-F]+_} $x {subquery} x
+  regsub -all {subquery_[0-9a-fA-F_]+} $x {subquery} x
   set x
-} {a.f1 11 a.f2 22 sqlite_subquery.5 5 sqlite_subquery.6 6}
+} {a.f1 11 a.f2 22 subquery.5 5 subquery.6 6}
 do_test select1-6.9.8 {
   set x [execsql2 {
      SELECT * FROM test1 a, (select 5 AS x, 6 AS y) AS b LIMIT 1
@@ -685,7 +688,7 @@ do_test select1-7.2 {
 do_test select1-7.3 {
   set v [catch {execsql {SELECT f1 FROM test1 as 'hi', test2 as}} msg]
   lappend v $msg
-} {1 {near "as": syntax error}}
+} {1 {incomplete input}}
 do_test select1-7.4 {
   set v [catch {execsql {
      SELECT f1 FROM test1 ORDER BY;
@@ -1072,5 +1075,94 @@ if {[db one {PRAGMA locking_mode}]=="normal"} {
 do_test select1-16.1 {
   catchsql {SELECT 1 FROM (SELECT *)}
 } {1 {no tables specified}}
-  
+
+# 2015-04-17:  assertion fix.
+do_catchsql_test select1-16.2 {
+  SELECT 1 FROM sqlite_master LIMIT 1,#1;
+} {1 {near "#1": syntax error}}
+
+# 2019-01-16 Chromium bug 922312
+# Sorting with a LIMIT clause using SRT_EphemTab and SRT_Table
+#
+do_execsql_test select1-17.1 {
+  DROP TABLE IF EXISTS t1;
+  DROP TABLE IF EXISTS t2;
+  CREATE TABLE t1(x);   INSERT INTO t1 VALUES(1);
+  CREATE TABLE t2(y,z); INSERT INTO t2 VALUES(2,3);
+  CREATE INDEX t2y ON t2(y);
+  SELECT * FROM t1,(SELECT * FROM t2 WHERE y=2 ORDER BY y,z);
+} {1 2 3}
+do_execsql_test select1-17.2 {
+  SELECT * FROM t1,(SELECT * FROM t2 WHERE y=2 ORDER BY y,z LIMIT 4);
+} {1 2 3}
+do_execsql_test select1-17.3 {
+  SELECT * FROM t1,(SELECT * FROM t2 WHERE y=2
+         UNION ALL SELECT * FROM t2 WHERE y=3 ORDER BY y,z LIMIT 4);
+} {1 2 3}
+
+# 2019-07-24 Ticket https://sqlite.org/src/tktview/c52b09c7f38903b1311
+#
+do_execsql_test select1-18.1 {
+  DROP TABLE IF EXISTS t1;
+  DROP TABLE IF EXISTS t2;
+  CREATE TABLE t1(c);
+  CREATE TABLE t2(x PRIMARY KEY, y);
+  INSERT INTO t1(c) VALUES(123);
+  INSERT INTO t2(x) VALUES(123);
+  SELECT x FROM t2, t1 WHERE x BETWEEN c AND null OR x AND
+  x IN ((SELECT x FROM (SELECT x FROM t2, t1 
+  WHERE x BETWEEN (SELECT x FROM (SELECT x COLLATE rtrim 
+  FROM t2, t1 WHERE x BETWEEN c AND null
+  OR x AND x IN (c)), t1 WHERE x BETWEEN c AND null
+  OR x AND x IN (c)) AND null
+  OR NOT EXISTS(SELECT -4.81 FROM t1, t2 WHERE x BETWEEN c AND null
+  OR x AND x IN ((SELECT x FROM (SELECT x FROM t2, t1
+  WHERE x BETWEEN (SELECT x FROM (SELECT x BETWEEN c AND null
+  OR x AND x IN (c)), t1 WHERE x BETWEEN c AND null
+  OR x AND x IN (c)) AND null
+  OR x AND x IN (c)), t1 WHERE x BETWEEN c AND null
+  OR x AND x IN (c)))) AND x IN (c)
+  ), t1 WHERE x BETWEEN c AND null
+  OR x AND x IN (c)));
+} {}
+do_execsql_test select1-18.2 {
+  DROP TABLE IF EXISTS t1;
+  DROP TABLE IF EXISTS t2;
+  CREATE TABLE t1(c);
+  CREATE TABLE t2(x PRIMARY KEY, y);
+  INSERT INTO t1(c) VALUES(123);
+  INSERT INTO t2(x) VALUES(123);
+  SELECT x FROM t2, t1 WHERE x BETWEEN c AND (c+1) OR x AND
+  x IN ((SELECT x FROM (SELECT x FROM t2, t1 
+  WHERE x BETWEEN (SELECT x FROM (SELECT x COLLATE rtrim 
+  FROM t2, t1 WHERE x BETWEEN c AND (c+1)
+  OR x AND x IN (c)), t1 WHERE x BETWEEN c AND (c+1)
+  OR x AND x IN (c)) AND (c+1)
+  OR NOT EXISTS(SELECT -4.81 FROM t1, t2 WHERE x BETWEEN c AND (c+1)
+  OR x AND x IN ((SELECT x FROM (SELECT x FROM t2, t1
+  WHERE x BETWEEN (SELECT x FROM (SELECT x BETWEEN c AND (c+1)
+  OR x AND x IN (c)), t1 WHERE x BETWEEN c AND (c+1)
+  OR x AND x IN (c)) AND (c+1)
+  OR x AND x IN (c)), t1 WHERE x BETWEEN c AND (c+1)
+  OR x AND x IN (c)))) AND x IN (c)
+  ), t1 WHERE x BETWEEN c AND (c+1)
+  OR x AND x IN (c)));
+} {123}
+do_execsql_test select1-18.3 {
+  SELECT 1 FROM t1 WHERE (
+    SELECT 2 FROM t2 WHERE (
+      SELECT 3 FROM (
+        SELECT x FROM t2 WHERE x=c OR x=(SELECT x FROM (VALUES(0)))
+      ) WHERE x>c OR x=c
+    )
+  );
+} {1}
+do_execsql_test select1-18.4 {
+  SELECT 1 FROM t1, t2 WHERE (
+    SELECT 3 FROM (
+      SELECT x FROM t2 WHERE x=c OR x=(SELECT x FROM (VALUES(0)))
+    ) WHERE x>c OR x=c
+  );
+} {1}
+
 finish_test

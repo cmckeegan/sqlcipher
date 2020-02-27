@@ -71,7 +71,7 @@ do_test fts3ao-2.5 {
     CREATE TABLE t1_segdir(a, b, c);
     ALTER TABLE fts_t1 RENAME to t1;
   }
-} {1 {SQL logic error or missing database}}
+} {1 {SQL logic error}}
 do_test fts3ao-2.6 {
   execsql { SELECT rowid, snippet(fts_t1) FROM fts_t1 WHERE a MATCH 'four'; }
 } {1 {one three <b>four</b>}}
@@ -91,9 +91,9 @@ do_test fts3ao-2.9 {
   catchsql {
     ALTER TABLE fts_t1 RENAME to t1;
   }
-} {1 {SQL logic error or missing database}}
+} {1 {SQL logic error}}
 do_test fts3ao-2.10 {
-  execsql { SELECT rowid, snippet(fts_t1) FROM fts_t1 WHERE a MATCH 'four'; }
+  execsql { SELECT rowid, snippet( fts_t1 ) FROM fts_t1 WHERE a MATCH 'four'; }
 } {1 {one three <b>four</b>}}
 do_test fts3ao-2.11 {
   execsql { SELECT tbl_name FROM sqlite_master WHERE type = 'table'}
@@ -219,5 +219,32 @@ do_execsql_test 5.2 {
   SELECT count(*) FROM sqlite_master WHERE name LIKE 't8%';
 } {0 6}
 
-finish_test
+# At one point this was causing a memory leak.
+#
+foreach {tn sql} {
+  1 {}
+  2 { INSERT INTO ft(ft) VALUES('merge=2,2'); }
+} {
+  reset_db
+  do_execsql_test 6.$tn.1 "
+    CREATE TABLE t1(x);
+    CREATE VIRTUAL TABLE ft USING fts3;
+    INSERT INTO ft VALUES('hello world');
+    $sql
+  "
 
+  db close
+  sqlite3 db test.db
+  do_execsql_test 6.$tn.2 { SELECT * FROM t1 } {}
+
+  do_test 6.$tn.3 {
+    sqlite3 db2 test.db
+    db2 eval { DROP TABLE t1 }
+    db2 close
+    set stmt [sqlite3_prepare db { SELECT * FROM ft } -1 dummy]
+    sqlite3_finalize $stmt
+  } {SQLITE_OK}
+  db close
+}
+
+finish_test

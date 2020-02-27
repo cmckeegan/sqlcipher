@@ -14,6 +14,7 @@
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
+set testprefix dbstatus
 
 ifcapable !compound {
   finish_test
@@ -24,6 +25,7 @@ ifcapable !compound {
 db close
 sqlite3_shutdown
 sqlite3_config_memstatus 1
+sqlite3_config_uri 1
 sqlite3_initialize
 sqlite3 db test.db
 
@@ -61,15 +63,10 @@ proc lookaside {db} {
   }
 }
 
-ifcapable stat3 {
+ifcapable stat4 {
   set STAT3 1
 } else {
   set STAT3 0
-}
-
-ifcapable malloc_usable_size {
-  finish_test
-  return
 }
 
 #---------------------------------------------------------------------------
@@ -77,6 +74,7 @@ ifcapable malloc_usable_size {
 # lookaside buffer sizes.
 #
 foreach ::lookaside_buffer_size {0 64 120} {
+  ifcapable malloc_usable_size break
 
   # Do not run any of these tests if there is SQL configured to run
   # as part of the [sqlite3] command. This prevents the script from
@@ -134,7 +132,7 @@ foreach ::lookaside_buffer_size {0 64 120} {
       CREATE TABLE t2(c, d);
       CREATE VIEW v1 AS SELECT * FROM t1 UNION SELECT * FROM t2;
     }
-    6y {
+    6k {
       CREATE TABLE t1(a, b);
       CREATE INDEX i1 ON t1(a);
       CREATE INDEX i2 ON t1(a,b);
@@ -204,6 +202,11 @@ foreach ::lookaside_buffer_size {0 64 120} {
     set nSchema4 [lindex [sqlite3_db_status db SQLITE_DBSTATUS_SCHEMA_USED 0] 1]
     set nFree [expr {$nAlloc1-$nAlloc2}]
     
+    # Tests for which the test name ends in an "k" report slightly less
+    # memory than is actually freed when all schema items are finalized.
+    # This is because memory allocated by KeyInfo objects is no longer
+    # counted as "schema memory".
+    #
     # Tests for which the test name ends in an "x" report slightly less
     # memory than is actually freed when all schema items are finalized.
     # This is because memory allocated by virtual table implementations
@@ -214,13 +217,14 @@ foreach ::lookaside_buffer_size {0 64 120} {
     # much greater than just that reported by DBSTATUS_SCHEMA_USED in this
     # case.
     #
-    # Some of the memory used for sqlite_stat3 is unaccounted for by
+    # Some of the memory used for sqlite_stat4 is unaccounted for by
     # dbstatus.
     #
     # Finally, on osx the estimate of memory used by the schema may be
     # slightly low. 
     #
-    if {[string match *x $tn] || $AUTOVACUUM
+    if {[string match *k $tn]
+         || [string match *x $tn] || $AUTOVACUUM
          || ([string match *y $tn] && $STAT3)
          || ($::tcl_platform(os) == "Darwin")
     } {
@@ -246,7 +250,7 @@ foreach ::lookaside_buffer_size {0 64 120} {
   #      lookaside memory allocated by SQLite, and the memory allocated 
   #      for the prepared statements according to sqlite3_db_status().
   #
-  #   3. Finalize all prepared statements Measure the total memory 
+  #   3. Finalize all prepared statements. Measure the total memory 
   #      and the prepared statement memory again.
   #
   #   4. Repeat step 2.
@@ -371,4 +375,83 @@ foreach ::lookaside_buffer_size {0 64 120} {
   }
 }
 
+#-------------------------------------------------------------------------
+# The following tests focus on DBSTATUS_CACHE_USED_SHARED
+#
+ifcapable shared_cache {
+  if {([permutation]=="memsys3"
+      || [permutation]=="memsys5"
+      || $::tcl_platform(os)=="Linux") && ![sqlite3 -has-codec]} {
+    proc do_cacheused_test {tn db res} {
+      set cu [sqlite3_db_status $db SQLITE_DBSTATUS_CACHE_USED 0]
+      set pcu [sqlite3_db_status $db SQLITE_DBSTATUS_CACHE_USED_SHARED 0]
+      set cu [lindex $cu 1]
+      set pcu [lindex $pcu 1]
+      uplevel [list do_test $tn [list list $cu $pcu] "#/$res/"]
+    }
+    reset_db
+    sqlite3 db file:test.db?cache=shared
+  
+    do_execsql_test 4.0 {
+      PRAGMA auto_vacuum=NONE;
+      CREATE TABLE t1(a, b, c);
+      INSERT INTO t1 VALUES(1, 2, 3);
+    }
+    do_cacheused_test 4.0.1 db { 4568 4568 }
+    do_execsql_test 4.1 {
+      CREATE TEMP TABLE tt(a, b, c);
+      INSERT INTO tt VALUES(1, 2, 3);
+    }
+    do_cacheused_test 4.1.1 db { 9000 9000 }
+  
+    sqlite3 db2 file:test.db?cache=shared
+    do_cacheused_test 4.2.1 db2 { 4568 2284 }
+    do_cacheused_test 4.2.2 db { 9000 6716 }
+    db close
+    do_cacheused_test 4.2.3 db2 { 4568 4568 }
+    sqlite3 db file:test.db?cache=shared
+    do_cacheused_test 4.2.4 db2 { 4568 2284 }
+    db2 close
+  }
+}
+
+#-------------------------------------------------------------------------
+# Test that passing an out-of-range value to sqlite3_stmt_status does
+# not cause a crash.
+reset_db
+do_execsql_test 5.0 {
+  CREATE TABLE t1(x, y);
+  INSERT INTO t1 VALUES(1, 2);
+  INSERT INTO t1 VALUES(3, 4);
+}
+
+do_test 5.1 {
+  set ::stmt [sqlite3_prepare db "SELECT * FROM t1" -1 dummy]
+  sqlite3_step $::stmt
+  sqlite3_step $::stmt
+  sqlite3_step $::stmt
+  sqlite3_reset $::stmt
+} {SQLITE_OK}
+
+ifcapable api_armor {
+  do_test 5.2 { sqlite3_stmt_status $::stmt -1 0 } 0
+}
+do_test 5.3 { sqlite3_stmt_status $::stmt  0 0 } 0
+do_test 5.4 { 
+  expr [sqlite3_stmt_status $::stmt 99 0]>0 
+} 1
+foreach {tn id res} {
+  1 SQLITE_STMTSTATUS_MEMUSED 1
+  2 SQLITE_STMTSTATUS_FULLSCAN_STEP 1
+  3 SQLITE_STMTSTATUS_SORT 0
+  4 SQLITE_STMTSTATUS_AUTOINDEX 0
+  5 SQLITE_STMTSTATUS_VM_STEP 1
+  6 SQLITE_STMTSTATUS_REPREPARE 0
+  7 SQLITE_STMTSTATUS_RUN 1
+} {
+if {$tn==2} breakpoint
+  do_test 5.5.$tn { expr [sqlite3_stmt_status $::stmt $id 0]>0 } $res
+}
+
+sqlite3_finalize $::stmt
 finish_test

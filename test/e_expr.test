@@ -254,13 +254,14 @@ foreach {tn a b} {
 #-------------------------------------------------------------------------
 # Test the % operator.
 #
-# EVIDENCE-OF: R-08914-63790 The operator % outputs the value of its
-# left operand modulo its right operand.
+# EVIDENCE-OF: R-04223-04352 The operator % outputs the integer value of
+# its left operand modulo its right operand.
 #
 do_execsql_test e_expr-6.1 {SELECT  72%5}  {2}
 do_execsql_test e_expr-6.2 {SELECT  72%-5} {2}
 do_execsql_test e_expr-6.3 {SELECT -72%-5} {-2}
 do_execsql_test e_expr-6.4 {SELECT -72%5}  {-2}
+do_execsql_test e_expr-6.5 {SELECT 72.35%5} {2.0}
 
 #-------------------------------------------------------------------------
 # Test that the results of all binary operators are either numeric or 
@@ -366,9 +367,9 @@ db collate reverse reverse_collate
 # EVIDENCE-OF: R-59577-33471 The COLLATE operator is a unary postfix
 # operator that assigns a collating sequence to an expression.
 #
-# EVIDENCE-OF: R-23441-22541 The COLLATE operator has a higher
-# precedence (binds more tightly) than any prefix unary operator or any
-# binary operator.
+# EVIDENCE-OF: R-36231-30731 The COLLATE operator has a higher
+# precedence (binds more tightly) than any binary operator and any unary
+# prefix operator except "~".
 #
 do_execsql_test e_expr-9.1 { SELECT  'abcd' < 'bbbb'    COLLATE reverse } 0
 do_execsql_test e_expr-9.2 { SELECT ('abcd' < 'bbbb')   COLLATE reverse } 1
@@ -450,7 +451,7 @@ do_execsql_test e_expr-10.3.4 { SELECT typeof('isn''t') } {text}
 # containing hexadecimal data and preceded by a single "x" or "X"
 # character.
 #
-# EVIDENCE-OF: R-39344-59787 For example: X'53514C697465'
+# EVIDENCE-OF: R-19836-11244 Example: X'53514C697465'
 #
 do_execsql_test e_expr-10.4.1 { SELECT typeof(X'0123456789ABCDEF') } blob
 do_execsql_test e_expr-10.4.2 { SELECT typeof(x'0123456789ABCDEF') } blob
@@ -631,7 +632,7 @@ do_test e_expr-11.7.1 { sqlite3_finalize $stmt } SQLITE_OK
 #-------------------------------------------------------------------------
 # "Test" the syntax diagrams in lang_expr.html.
 #
-# EVIDENCE-OF: R-02989-21050 -- syntax diagram signed-number
+# -- syntax diagram signed-number
 #
 do_execsql_test e_expr-12.1.1 { SELECT 0, +0, -0 } {0 0 0}
 do_execsql_test e_expr-12.1.2 { SELECT 1, +1, -1 } {1 1 -1}
@@ -646,7 +647,7 @@ do_execsql_test e_expr-12.1.6 {
   SELECT 0.0001, +0.0001, -0.0001 
 } {0.0001 0.0001 -0.0001}
 
-# EVIDENCE-OF: R-43188-60852 -- syntax diagram literal-value
+# -- syntax diagram literal-value
 #
 set sqlite_current_time 1
 do_execsql_test e_expr-12.2.1 {SELECT 123}               {123}
@@ -659,7 +660,7 @@ do_execsql_test e_expr-12.2.7 {SELECT CURRENT_DATE}      {1970-01-01}
 do_execsql_test e_expr-12.2.8 {SELECT CURRENT_TIMESTAMP} {{1970-01-01 00:00:01}}
 set sqlite_current_time 0
 
-# EVIDENCE-OF: R-50544-32159 -- syntax diagram expr
+# -- syntax diagram expr
 #
 forcedelete test.db2
 execsql {
@@ -816,7 +817,7 @@ foreach {tn expr} {
   }
 }
 
-# EVIDENCE-OF: R-39820-63916 -- syntax diagram raise-function
+# -- syntax diagram raise-function
 #
 foreach {tn raiseexpr} {
   1 "RAISE(IGNORE)"
@@ -847,6 +848,9 @@ foreach {tn x expr res nEval} {
 
   3   5  "x() >= 5 AND x() <= 5"   1  2
   4   5  "x() BETWEEN 5 AND 5"     1  1
+
+  5   9  "(x(),8) >= (9,7) AND (x(),8)<=(9,10)"  1 2
+  6   9  "(x(),8) BETWEEN (9,7) AND (9,10)"      1 1
 } {
   do_test e_expr-13.1.$tn {
     set ::xcount 0
@@ -1009,13 +1013,18 @@ sqlite3 db test.db
 # EVIDENCE-OF: R-22868-25880 The LIKE operator can be made case
 # sensitive using the case_sensitive_like pragma.
 #
-do_execsql_test e_expr-16.1.1 { SELECT 'abcxyz' LIKE 'ABC%' } 1
-do_execsql_test e_expr-16.1.2 { PRAGMA case_sensitive_like = 1 } {}
-do_execsql_test e_expr-16.1.3 { SELECT 'abcxyz' LIKE 'ABC%' } 0
-do_execsql_test e_expr-16.1.4 { SELECT 'ABCxyz' LIKE 'ABC%' } 1
-do_execsql_test e_expr-16.1.5 { PRAGMA case_sensitive_like = 0 } {}
-do_execsql_test e_expr-16.1.6 { SELECT 'abcxyz' LIKE 'ABC%' } 1
-do_execsql_test e_expr-16.1.7 { SELECT 'ABCxyz' LIKE 'ABC%' } 1
+do_execsql_test e_expr-16.1.1  { SELECT 'abcxyz' LIKE 'ABC%' } 1
+do_execsql_test e_expr-16.1.1b { SELECT 'abc%xyz' LIKE 'ABC\%x%' ESCAPE '\' } 1
+do_execsql_test e_expr-16.1.2  { PRAGMA case_sensitive_like = 1 } {}
+do_execsql_test e_expr-16.1.3  { SELECT 'abcxyz' LIKE 'ABC%' } 0
+do_execsql_test e_expr-16.1.3b { SELECT 'abc%xyz' LIKE 'ABC\%X%' ESCAPE '\' } 0
+do_execsql_test e_expr-16.1.4  { SELECT 'ABCxyz' LIKE 'ABC%' } 1
+do_execsql_test e_expr-16.1.4b { SELECT 'ABC%xyz' LIKE 'ABC\%x%' ESCAPE '\' } 1
+do_execsql_test e_expr-16.1.5  { PRAGMA case_sensitive_like = 0 } {}
+do_execsql_test e_expr-16.1.6  { SELECT 'abcxyz' LIKE 'ABC%' } 1
+do_execsql_test e_expr-16.1.6b { SELECT 'abc%xyz' LIKE 'ABC\%X%' ESCAPE '\' } 1
+do_execsql_test e_expr-16.1.7  { SELECT 'ABCxyz' LIKE 'ABC%' } 1
+do_execsql_test e_expr-16.1.7b { SELECT 'ABC%xyz' LIKE 'ABC\%X%' ESCAPE '\' } 1
 
 # EVIDENCE-OF: R-52087-12043 The GLOB operator is similar to LIKE but
 # uses the Unix file globbing syntax for its wildcards.
@@ -1081,9 +1090,9 @@ ifcapable !icu {
 # EVIDENCE-OF: R-33693-50180 The REGEXP operator is a special syntax for
 # the regexp() user function.
 #
-# EVIDENCE-OF: R-57289-13578 If a application-defined SQL function named
-# "regexp" is added at run-time, that function will be called in order
-# to implement the REGEXP operator.
+# EVIDENCE-OF: R-65524-61849 If an application-defined SQL function
+# named "regexp" is added at run-time, then the "X REGEXP Y" operator
+# will be implemented as a call to "regexp(Y,X)".
 #
 proc regexpfunc {args} {
   eval lappend ::regexpargs $args
@@ -1294,7 +1303,7 @@ proc rev {str} {
   set ret
 }
 proc reverse {lhs rhs} {
-  string compare [rev $lhs] [ref $rhs]
+  string compare [rev $lhs] [rev $rhs]
 }
 db collate reverse reverse
 do_execsql_test e_expr-23.1.1 {
@@ -1317,7 +1326,7 @@ do_execsql_test e_expr-23.1.4 {
 } {B}
 do_execsql_test e_expr-23.1.5 {
   SELECT CASE b WHEN a THEN 'A' ELSE 'B' END FROM t1
-} {A}
+} {B}
 do_execsql_test e_expr-23.1.6 {
   SELECT CASE 55 WHEN '55' THEN 'A' ELSE 'B' END
 } {B}
@@ -1407,10 +1416,12 @@ do_test e_expr-26.1.6 { set ::evalcount } {5}
 #-------------------------------------------------------------------------
 # Test statements related to CAST expressions.
 #
-# EVIDENCE-OF: R-65079-31758 Application of a CAST expression is
-# different to application of a column affinity, as with a CAST
-# expression the storage class conversion is forced even if it is lossy
-# and irrreversible.
+# EVIDENCE-OF: R-20854-17109 A CAST conversion is similar to the
+# conversion that takes place when a column affinity is applied to a
+# value except that with the CAST operator the conversion always takes
+# place even if the conversion lossy and irreversible, whereas column
+# affinity only changes the data type of a value if the change is
+# lossless and reversible.
 #
 do_execsql_test e_expr-27.1.1 {
   CREATE TABLE t3(a TEXT, b REAL, c INTEGER);
@@ -1424,16 +1435,23 @@ do_execsql_test e_expr-27.1.2 {
     typeof(CAST(4.5 as INTEGER)), CAST(4.5 as INTEGER)
 } {text UVU real 1.23 integer 4}
 
-# EVIDENCE-OF: R-27225-65050 If the value of <expr> is NULL, then
-# the result of the CAST expression is also NULL.
+# EVIDENCE-OF: R-32434-09092 If the value of expr is NULL, then the
+# result of the CAST expression is also NULL.
 #
 do_expr_test e_expr-27.2.1 { CAST(NULL AS integer) } null {}
 do_expr_test e_expr-27.2.2 { CAST(NULL AS text) }    null {}
 do_expr_test e_expr-27.2.3 { CAST(NULL AS blob) }    null {}
 do_expr_test e_expr-27.2.4 { CAST(NULL AS number) }  null {}
 
-# EVIDENCE-OF: R-31076-23575 Casting a value to a <type-name> with
-# no affinity causes the value to be converted into a BLOB.
+# EVIDENCE-OF: R-29283-15561 Otherwise, the storage class of the result
+# is determined by applying the rules for determining column affinity to
+# the type-name.
+#
+# The R-29283-15561 requirement above is demonstrated by all of the 
+# subsequent e_expr-26 tests.
+#
+# EVIDENCE-OF: R-43522-35548 Casting a value to a type-name with no
+# affinity causes the value to be converted into a BLOB.
 #
 do_expr_test e_expr-27.3.1 { CAST('abc' AS blob)       } blob abc
 do_expr_test e_expr-27.3.2 { CAST('def' AS shobblob_x) } blob def
@@ -1594,38 +1612,72 @@ do_expr_test e_expr-30.4.1 { CAST('' AS INTEGER) } integer 0
 do_expr_test e_expr-30.4.2 { CAST('not a number' AS INTEGER) } integer 0
 do_expr_test e_expr-30.4.3 { CAST('XXI' AS INTEGER) } integer 0
 
-# EVIDENCE-OF: R-00741-38776 A cast of a REAL value into an INTEGER will
-# truncate the fractional part of the REAL.
+# EVIDENCE-OF: R-08980-53124 The CAST operator understands decimal
+# integers only &mdash; conversion of hexadecimal integers stops at
+# the "x" in the "0x" prefix of the hexadecimal integer string and thus
+# result of the CAST is always zero.
+do_expr_test e_expr-30.5.1 { CAST('0x1234' AS INTEGER) } integer 0
+do_expr_test e_expr-30.5.2 { CAST('0X1234' AS INTEGER) } integer 0
+
+# EVIDENCE-OF: R-02752-50091 A cast of a REAL value into an INTEGER
+# results in the integer between the REAL value and zero that is closest
+# to the REAL value.
 #
 do_expr_test e_expr-31.1.1 { CAST(3.14159 AS INTEGER) } integer 3
 do_expr_test e_expr-31.1.2 { CAST(1.99999 AS INTEGER) } integer 1
 do_expr_test e_expr-31.1.3 { CAST(-1.99999 AS INTEGER) } integer -1
 do_expr_test e_expr-31.1.4 { CAST(-0.99999 AS INTEGER) } integer 0
 
-# EVIDENCE-OF: R-49503-28105 If a REAL is too large to be represented as
-# an INTEGER then the result of the cast is the largest negative
-# integer: -9223372036854775808.
+# EVIDENCE-OF: R-51517-40824 If a REAL is greater than the greatest
+# possible signed integer (+9223372036854775807) then the result is the
+# greatest possible signed integer and if the REAL is less than the
+# least possible signed integer (-9223372036854775808) then the result
+# is the least possible signed integer.
 #
-do_expr_test e_expr-31.2.1 { CAST(2e+50 AS INT) } integer -9223372036854775808
+do_expr_test e_expr-31.2.1 { CAST(2e+50 AS INT) } integer 9223372036854775807
 do_expr_test e_expr-31.2.2 { CAST(-2e+50 AS INT) } integer -9223372036854775808
 do_expr_test e_expr-31.2.3 { 
   CAST(-9223372036854775809.0 AS INT)
 } integer -9223372036854775808
 do_expr_test e_expr-31.2.4 { 
   CAST(9223372036854775809.0 AS INT)
-} integer -9223372036854775808
+} integer 9223372036854775807
 
 
-# EVIDENCE-OF: R-09295-61337 Casting a TEXT or BLOB value into NUMERIC
-# first does a forced conversion into REAL but then further converts the
-# result into INTEGER if and only if the conversion from REAL to INTEGER
-# is lossless and reversible.
+# EVIDENCE-OF: R-55084-10555 Casting a TEXT or BLOB value into NUMERIC
+# yields either an INTEGER or a REAL result.
+#
+# EVIDENCE-OF: R-48945-04866 If the input text looks like an integer
+# (there is no decimal point nor exponent) and the value is small enough
+# to fit in a 64-bit signed integer, then the result will be INTEGER.
+#
+# EVIDENCE-OF: R-47045-23194 Input text that looks like floating point
+# (there is a decimal point and/or an exponent) and the text describes a
+# value that can be losslessly converted back and forth between IEEE 754
+# 64-bit float and a 51-bit signed integer, then the result is INTEGER.
 #
 do_expr_test e_expr-32.1.1 { CAST('45'   AS NUMERIC)  } integer 45
 do_expr_test e_expr-32.1.2 { CAST('45.0' AS NUMERIC)  } integer 45
 do_expr_test e_expr-32.1.3 { CAST('45.2' AS NUMERIC)  } real 45.2
 do_expr_test e_expr-32.1.4 { CAST('11abc' AS NUMERIC) } integer 11
 do_expr_test e_expr-32.1.5 { CAST('11.1abc' AS NUMERIC) } real 11.1
+do_expr_test e_expr-32.1.6 {CAST( '9.223372036e14' AS NUMERIC)} integer  922337203600000
+do_expr_test e_expr-32.1.7 {CAST('-9.223372036e14' AS NUMERIC)} integer -922337203600000
+do_expr_test e_expr-32.1.8 {CAST( '9.223372036e15' AS NUMERIC)} real     9223372036000000.0
+do_expr_test e_expr-32.1.9 {CAST('-9.223372036e15' AS NUMERIC)} real    -9223372036000000.0
+
+
+# EVIDENCE-OF: R-50300-26941 Any text input that describes a value
+# outside the range of a 64-bit signed integer yields a REAL result.
+#
+do_expr_test e_expr-32.1.20 { CAST('9223372036854775807' AS numeric) } \
+   integer 9223372036854775807
+do_expr_test e_expr-32.1.21 { CAST('9223372036854775808' AS numeric) } \
+   real 9.22337203685478e+18
+do_expr_test e_expr-32.1.22 { CAST('-9223372036854775808' AS numeric) } \
+   integer -9223372036854775808
+do_expr_test e_expr-32.1.23 { CAST('-9223372036854775809' AS numeric) } \
+   real -9.22337203685478e+18
 
 # EVIDENCE-OF: R-30347-18702 Casting a REAL or INTEGER value to NUMERIC
 # is a no-op, even if a real value could be losslessly converted to an
@@ -1640,6 +1692,50 @@ do_expr_test e_expr-32.2.3 {
 do_expr_test e_expr-32.2.4 { 
   CAST(9223372036854775807 AS NUMERIC)
 } integer 9223372036854775807
+do_expr_test e_expr-32.2.5 { 
+  CAST('9223372036854775807 ' AS NUMERIC)
+} integer 9223372036854775807
+do_expr_test e_expr-32.2.6 { 
+  CAST('   9223372036854775807   ' AS NUMERIC)
+} integer 9223372036854775807
+do_expr_test e_expr-32.2.7 { 
+  CAST('  ' AS NUMERIC)
+} integer 0
+do_execsql_test e_expr-32.2.8 {
+  WITH t1(x) AS (VALUES
+     ('9000000000000000001'),
+     ('9000000000000000001x'),
+     ('9000000000000000001 '),
+     (' 9000000000000000001 '),
+     (' 9000000000000000001'),
+     (' 9000000000000000001.'),
+     ('9223372036854775807'),
+     ('9223372036854775807 '),
+     ('   9223372036854775807   '),
+     ('9223372036854775808'),
+     ('   9223372036854775808   '),
+     ('9223372036854775807.0'),
+     ('9223372036854775807e+0'),
+     ('-5.0'),
+     ('-5e+0'))
+  SELECT typeof(CAST(x AS NUMERIC)), CAST(x AS NUMERIC)||'' FROM t1;
+} [list \
+ integer 9000000000000000001 \
+ integer 9000000000000000001 \
+ integer 9000000000000000001 \
+ integer 9000000000000000001 \
+ integer 9000000000000000001 \
+ real 9.0e+18 \
+ integer 9223372036854775807 \
+ integer 9223372036854775807 \
+ integer 9223372036854775807 \
+ real 9.22337203685478e+18 \
+ real 9.22337203685478e+18 \
+ real 9.22337203685478e+18 \
+ real 9.22337203685478e+18 \
+ integer -5 \
+ integer -5 \
+]
 
 # EVIDENCE-OF: R-64550-29191 Note that the result from casting any
 # non-BLOB value into a BLOB and the result from casting any BLOB value
@@ -1771,8 +1867,8 @@ do_test e_expr-35.0 {
   }
 } {}
 
-# EVIDENCE-OF: R-00980-39256 A SELECT statement enclosed in parentheses
-# may appear as a scalar quantity.
+# EVIDENCE-OF: R-43573-23448 A SELECT statement enclosed in parentheses
+# is a subquery.
 #
 # EVIDENCE-OF: R-56294-03966 All types of SELECT statement, including
 # aggregate and compound SELECT queries (queries with keywords like
@@ -1791,13 +1887,14 @@ do_expr_test e_expr-35.1.6 {
   (SELECT a FROM t2 UNION SELECT COALESCE(b, 55) FROM t2 ORDER BY 1)
 } integer 4
 
-# EVIDENCE-OF: R-46899-53765 A SELECT used as a scalar quantity must
-# return a result set with a single column.
+# EVIDENCE-OF: R-22239-33740 A subquery that returns two or more columns
+# is a row value subquery and can only be used as the operand of a
+# comparison operator.
 #
 # The following block tests that errors are returned in a bunch of cases
 # where a subquery returns more than one column.
 #
-set M {only a single result allowed for a SELECT that is part of an expression}
+set M {/1 {sub-select returns [23] columns - expected 1}/}
 foreach {tn sql} {
   1     { SELECT (SELECT * FROM t2 UNION SELECT a+1, b+1 FROM t2) }
   2     { SELECT (SELECT * FROM t2 UNION SELECT a+1, b+1 FROM t2 ORDER BY 1) }
@@ -1806,14 +1903,14 @@ foreach {tn sql} {
   5     { SELECT (SELECT * FROM t2) }
   6     { SELECT (SELECT * FROM (SELECT 1, 2, 3)) }
 } {
-  do_catchsql_test e_expr-35.2.$tn $sql [list 1 $M]
+  do_catchsql_test e_expr-35.2.$tn $sql $M
 }
 
-# EVIDENCE-OF: R-35764-28041 The result of the expression is the value
-# of the only column in the first row returned by the SELECT statement.
+# EVIDENCE-OF: R-18318-14995 The value of a subquery expression is the
+# first row of the result from the enclosed SELECT statement.
 #
-# EVIDENCE-OF: R-41898-06686 If the SELECT yields more than one result
-# row, all rows after the first are ignored.
+# EVIDENCE-OF: R-15900-52156 In other words, an implied "LIMIT 1" is
+# added to the subquery, overriding an explicitly coded LIMIT.
 #
 do_execsql_test e_expr-36.3.1 {
   CREATE TABLE t4(x, y);
@@ -1837,8 +1934,8 @@ foreach {tn expr restype resval} {
   do_expr_test e_expr-36.3.$tn $expr $restype $resval
 }
 
-# EVIDENCE-OF: R-25492-41572 If the SELECT yields no rows, then the
-# value of the expression is NULL.
+# EVIDENCE-OF: R-52325-25449 The value of a subquery expression is NULL
+# if the enclosed SELECT statement returns no rows.
 #
 foreach {tn expr} {
     1  { ( SELECT x FROM t4 WHERE x>3 ORDER BY x )      }
@@ -1846,6 +1943,44 @@ foreach {tn expr} {
 } {
   do_expr_test e_expr-36.4.$tn $expr null {}
 }
+
+# EVIDENCE-OF: R-62477-06476 For example, the values NULL, 0.0, 0,
+# 'english' and '0' are all considered to be false.
+#
+do_execsql_test e_expr-37.1 {
+   SELECT CASE WHEN NULL THEN 'true' ELSE 'false' END;
+} {false}
+do_execsql_test e_expr-37.2 {
+   SELECT CASE WHEN 0.0 THEN 'true' ELSE 'false' END;
+} {false}
+do_execsql_test e_expr-37.3 {
+   SELECT CASE WHEN 0 THEN 'true' ELSE 'false' END;
+} {false}
+do_execsql_test e_expr-37.4 {
+   SELECT CASE WHEN 'engligh' THEN 'true' ELSE 'false' END;
+} {false}
+do_execsql_test e_expr-37.5 {
+   SELECT CASE WHEN '0' THEN 'true' ELSE 'false' END;
+} {false}
+
+# EVIDENCE-OF: R-55532-10108 Values 1, 1.0, 0.1, -0.1 and '1english' are
+# considered to be true.
+#
+do_execsql_test e_expr-37.6 {
+   SELECT CASE WHEN 1 THEN 'true' ELSE 'false' END;
+} {true}
+do_execsql_test e_expr-37.7 {
+   SELECT CASE WHEN 1.0 THEN 'true' ELSE 'false' END;
+} {true}
+do_execsql_test e_expr-37.8 {
+   SELECT CASE WHEN 0.1 THEN 'true' ELSE 'false' END;
+} {true}
+do_execsql_test e_expr-37.9 {
+   SELECT CASE WHEN -0.1 THEN 'true' ELSE 'false' END;
+} {true}
+do_execsql_test e_expr-37.10 {
+   SELECT CASE WHEN '1english' THEN 'true' ELSE 'false' END;
+} {true}
 
 
 finish_test

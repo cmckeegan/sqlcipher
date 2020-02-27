@@ -65,7 +65,16 @@ do_test jrnlmode-1.2 {
     PRAGMA temp.journal_mode;
   } 
 } [list persist persist [temp_journal_mode persist]]
-do_test jrnlmode-1.4 {
+do_test jrnlmode-1.4a {
+  # When defensive is on, unable to set journal_mode to OFF
+  sqlite3_db_config db DEFENSIVE 1
+  execsql {
+    PRAGMA journal_mode = off;
+  } 
+} {persist}
+do_test jrnlmode-1.4b {
+  # When defensive is on, unable to set journal_mode to OFF
+  sqlite3_db_config db DEFENSIVE 0
   execsql {
     PRAGMA journal_mode = off;
   } 
@@ -302,6 +311,7 @@ ifcapable autovacuum&&pragma {
 # The following test caes, jrnlmode-5.*, test the journal_size_limit
 # pragma.
 ifcapable pragma {
+if {[atomic_batch_write test.db]==0} {
   db close
   forcedelete test.db test2.db test3.db
   sqlite3 db test.db
@@ -454,8 +464,10 @@ ifcapable pragma {
     list [file exists test.db-journal] [file size test.db-journal]
   } {1 0}
 }
+}
 
 ifcapable pragma {
+if {[atomic_batch_write test.db]==0} {
   # These tests are not run as part of the "journaltest" permutation,
   # as the test_journal.c layer is incompatible with in-memory journaling.
   if {[permutation] ne "journaltest"} {
@@ -507,6 +519,7 @@ ifcapable pragma {
     } {0}
   }
 }
+}
 
 ifcapable pragma {
   catch { db close }
@@ -554,5 +567,19 @@ do_execsql_test jrnlmode-8.27 { BEGIN IMMEDIATE }               {}
 do_execsql_test jrnlmode-8.28 { PRAGMA journal_mode=DELETE }    {delete}
 do_execsql_test jrnlmode-8.29 { COMMIT }                        {}
 do_execsql_test jrnlmode-8.30 { PRAGMA journal_mode=DELETE }    {delete}
+
+# Assertion fault on 2015-05-01
+do_test jrnlmode-9.1 {
+  forcedelete test2.db
+  sqlite3 db2 test2.db
+  db2 eval {CREATE TEMP TABLE t(l); PRAGMA journal_mode=off;}
+  db2 close
+} {}
+do_execsql_test jrnlmode-9.2 {
+  PRAGMA locking_mode = exclusive;
+  CREATE TABLE tx(a);
+  PRAGMA journal_mode = off;
+} {exclusive off}
+
 
 finish_test

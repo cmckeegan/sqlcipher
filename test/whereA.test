@@ -68,6 +68,12 @@ do_test whereA-1.7 {
     SELECT * FROM t1;
   }
 } {3 4.53 {} 2 hello world 1 2 3}
+do_execsql_test whereA-1.8 {
+  SELECT * FROM t1 WHERE b=2 AND a IS NULL;
+} {}
+do_execsql_test whereA-1.9 {
+  SELECT * FROM t1 WHERE b=2 AND a IS NOT NULL;
+} {1 2 3}
 
 do_test whereA-2.1 {
   db eval {
@@ -151,6 +157,18 @@ do_test whereA-4.6 {
     SELECT x FROM t2 ORDER BY x DESC;
   }
 } {2 1 1}
+
+# Ticket https://sqlite.org/src/tktview/cb91bf4290c211  2017-08-01
+# Assertion fault following PRAGMA reverse_unordered_selects=ON.
+# 
+do_execsql_test whereA-5.1 {
+  PRAGMA reverse_unordered_selects=on;
+  DROP TABLE IF EXISTS t1;
+  CREATE TABLE t1(a,b);
+  INSERT INTO t1 VALUES(1,2);
+  CREATE INDEX t1b ON t1(b);
+  SELECT a FROM t1 WHERE b=-99 OR b>1;
+} {1}
 
 
 finish_test

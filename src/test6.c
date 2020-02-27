@@ -16,7 +16,11 @@
 */
 #if SQLITE_TEST          /* This file is used for testing only */
 #include "sqliteInt.h"
-#include "tcl.h"
+#if defined(INCLUDE_SQLITE_TCL_H)
+#  include "sqlite_tcl.h"
+#else
+#  include "tcl.h"
+#endif
 
 #ifndef SQLITE_OMIT_DISKIO  /* This file is a no-op if disk I/O is disabled */
 
@@ -87,7 +91,7 @@ typedef struct WriteBuffer WriteBuffer;
 **   an aligned write() of an integer number of 512 byte regions, then
 **   option (3) above is never selected. Instead, each 512 byte region
 **   is either correctly written or left completely untouched. Similar
-**   logic governs the behaviour if any of the other ATOMICXXX flags
+**   logic governs the behavior if any of the other ATOMICXXX flags
 **   is set.
 **
 **   If either the IOCAP_SAFEAPPEND or IOCAP_SEQUENTIAL flags are set
@@ -133,9 +137,9 @@ struct CrashFile {
   ** OsFileSize() calls. Although both could be done by traversing the
   ** write-list, in practice this is impractically slow.
   */
-  int iSize;                           /* Size of file in bytes */
-  int nData;                           /* Size of buffer allocated at zData */
   u8 *zData;                           /* Buffer containing file contents */
+  int nData;                           /* Size of buffer allocated at zData */
+  i64 iSize;                           /* Size of file in bytes */
 };
 
 struct CrashGlobal {
@@ -157,13 +161,13 @@ static CrashGlobal g = {0, 0, SQLITE_DEFAULT_SECTOR_SIZE, 0, 0};
 static int sqlite3CrashTestEnable = 0;
 
 static void *crash_malloc(int nByte){
-  return (void *)Tcl_Alloc((size_t)nByte);
+  return (void *)Tcl_AttemptAlloc((size_t)nByte);
 }
 static void crash_free(void *p){
   Tcl_Free(p);
 }
 static void *crash_realloc(void *p, int n){
-  return (void *)Tcl_Realloc(p, (size_t)n);
+  return (void *)Tcl_AttemptRealloc(p, (size_t)n);
 }
 
 /*
@@ -173,9 +177,6 @@ static void *crash_realloc(void *p, int n){
 static int writeDbFile(CrashFile *p, u8 *z, i64 iAmt, i64 iOff){
   int rc = SQLITE_OK;
   int iSkip = 0;
-  if( iOff==PENDING_BYTE && (p->flags&SQLITE_OPEN_MAIN_DB) ){
-    iSkip = 512;
-  }
   if( (iAmt-iSkip)>0 ){
     rc = sqlite3OsWrite(p->pRealFile, &z[iSkip], (int)(iAmt-iSkip), iOff+iSkip);
   }
@@ -218,7 +219,9 @@ static int writeListSync(CrashFile *pFile, int isCrash){
   }
 
 #ifdef TRACE_CRASHTEST
-  printf("Sync %s (is %s crash)\n", pFile->zName, (isCrash?"a":"not a"));
+  if( pFile ){
+    printf("Sync %s (is %s crash)\n", pFile->zName, (isCrash?"a":"not a"));
+  }
 #endif
 
   ppPtr = &g.pWriteList;
@@ -312,8 +315,9 @@ static int writeListSync(CrashFile *pFile, int isCrash){
         assert(pWrite->zBuf);
 
 #ifdef TRACE_CRASHTEST
-        printf("Trashing %d sectors @ sector %d (%s)\n", 
-            1+iLast-iFirst, iFirst, pWrite->pFile->zName
+        printf("Trashing %d sectors (%d bytes) @ %lld (sector %d) (%s)\n", 
+            1+iLast-iFirst, (1+iLast-iFirst)*g.iSectorSize,
+            pWrite->iOffset, iFirst, pWrite->pFile->zName
         );
 #endif
 
@@ -409,13 +413,17 @@ static int cfRead(
   sqlite_int64 iOfst
 ){
   CrashFile *pCrash = (CrashFile *)pFile;
+  int nCopy = (int)MIN((i64)iAmt, (pCrash->iSize - iOfst));
+
+  if( nCopy>0 ){
+    memcpy(zBuf, &pCrash->zData[iOfst], nCopy);
+  }
 
   /* Check the file-size to see if this is a short-read */
-  if( pCrash->iSize<(iOfst+iAmt) ){
+  if( nCopy<iAmt ){
     return SQLITE_IOERR_SHORT_READ;
   }
 
-  memcpy(zBuf, &pCrash->zData[iOfst], iAmt);
   return SQLITE_OK;
 }
 
@@ -621,25 +629,24 @@ static int cfOpen(
     pWrapper->flags = flags;
   }
   if( rc==SQLITE_OK ){
-    pWrapper->nData = (4096 + pWrapper->iSize);
+    pWrapper->nData = (int)(4096 + pWrapper->iSize);
     pWrapper->zData = crash_malloc(pWrapper->nData);
     if( pWrapper->zData ){
       /* os_unix.c contains an assert() that fails if the caller attempts
       ** to read data from the 512-byte locking region of a file opened
       ** with the SQLITE_OPEN_MAIN_DB flag. This region of a database file
       ** never contains valid data anyhow. So avoid doing such a read here.
+      **
+      ** UPDATE: It also contains an assert() verifying that each call
+      ** to the xRead() method reads less than 128KB of data.
       */
-      const int isDb = (flags&SQLITE_OPEN_MAIN_DB);
-      i64 iChunk = pWrapper->iSize;
-      if( iChunk>PENDING_BYTE && isDb ){
-        iChunk = PENDING_BYTE;
-      }
+      i64 iOff;
+
       memset(pWrapper->zData, 0, pWrapper->nData);
-      rc = sqlite3OsRead(pReal, pWrapper->zData, (int)iChunk, 0); 
-      if( SQLITE_OK==rc && pWrapper->iSize>(PENDING_BYTE+512) && isDb ){
-        i64 iOff = PENDING_BYTE+512;
-        iChunk = pWrapper->iSize - iOff;
-        rc = sqlite3OsRead(pReal, &pWrapper->zData[iOff], (int)iChunk, iOff);
+      for(iOff=0; iOff<pWrapper->iSize; iOff += 512){
+        int nRead = (int)(pWrapper->iSize - iOff);
+        if( nRead>512 ) nRead = 512;
+        rc = sqlite3OsRead(pReal, &pWrapper->zData[iOff], nRead, iOff);
       }
     }else{
       rc = SQLITE_NOMEM;
@@ -701,6 +708,10 @@ static int cfCurrentTime(sqlite3_vfs *pCfVfs, double *pTimeOut){
   sqlite3_vfs *pVfs = (sqlite3_vfs *)pCfVfs->pAppData;
   return pVfs->xCurrentTime(pVfs, pTimeOut);
 }
+static int cfGetLastError(sqlite3_vfs *pCfVfs, int n, char *z){
+  sqlite3_vfs *pVfs = (sqlite3_vfs *)pCfVfs->pAppData;
+  return pVfs->xGetLastError(pVfs, n, z);
+}
 
 static int processDevSymArgs(
   Tcl_Interp *interp,
@@ -725,6 +736,7 @@ static int processDevSymArgs(
     { "sequential",          SQLITE_IOCAP_SEQUENTIAL            },
     { "safe_append",         SQLITE_IOCAP_SAFE_APPEND           },
     { "powersafe_overwrite", SQLITE_IOCAP_POWERSAFE_OVERWRITE   },
+    { "batch-atomic",        SQLITE_IOCAP_BATCH_ATOMIC          },
     { 0, 0 }
   };
 
@@ -796,18 +808,40 @@ static int processDevSymArgs(
 }
 
 /*
-** tclcmd:   sqlite_crash_enable ENABLE
+** tclcmd:   sqlite3_crash_now
+**
+** Simulate a crash immediately. This function does not return 
+** (writeListSync() calls exit(-1)).
+*/
+static int SQLITE_TCLAPI crashNowCmd(
+  void * clientData,
+  Tcl_Interp *interp,
+  int objc,
+  Tcl_Obj *CONST objv[]
+){
+  if( objc!=1 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "");
+    return TCL_ERROR;
+  }
+  writeListSync(0, 1);
+  assert( 0 );
+  return TCL_OK;
+}
+
+/*
+** tclcmd:   sqlite_crash_enable ENABLE ?DEFAULT?
 **
 ** Parameter ENABLE must be a boolean value. If true, then the "crash"
 ** vfs is added to the system. If false, it is removed.
 */
-static int crashEnableCmd(
+static int SQLITE_TCLAPI crashEnableCmd(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
   Tcl_Obj *CONST objv[]
 ){
   int isEnable;
+  int isDefault = 0;
   static sqlite3_vfs crashVfs = {
     2,                  /* iVersion */
     0,                  /* szOsFile */
@@ -827,16 +861,19 @@ static int crashEnableCmd(
     cfRandomness,         /* xRandomness */
     cfSleep,              /* xSleep */
     cfCurrentTime,        /* xCurrentTime */
-    0,                    /* xGetlastError */
+    cfGetLastError,       /* xGetLastError */
     0,                    /* xCurrentTimeInt64 */
   };
 
-  if( objc!=2 ){
-    Tcl_WrongNumArgs(interp, 1, objv, "ENABLE");
+  if( objc!=2 && objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "ENABLE ?DEFAULT?");
     return TCL_ERROR;
   }
 
   if( Tcl_GetBooleanFromObj(interp, objv[1], &isEnable) ){
+    return TCL_ERROR;
+  }
+  if( objc==3 && Tcl_GetBooleanFromObj(interp, objv[2], &isDefault) ){
     return TCL_ERROR;
   }
 
@@ -849,7 +886,7 @@ static int crashEnableCmd(
     crashVfs.mxPathname = pOriginalVfs->mxPathname;
     crashVfs.pAppData = (void *)pOriginalVfs;
     crashVfs.szOsFile = sizeof(CrashFile) + pOriginalVfs->szOsFile;
-    sqlite3_vfs_register(&crashVfs, 0);
+    sqlite3_vfs_register(&crashVfs, isDefault);
   }else{
     crashVfs.pAppData = 0;
     sqlite3_vfs_unregister(&crashVfs);
@@ -876,7 +913,7 @@ static int crashEnableCmd(
 **   sqlite_crashparams -sect 1024 -char {atomic sequential} ./test.db 1
 **
 */
-static int crashParamsObjCmd(
+static int SQLITE_TCLAPI crashParamsObjCmd(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -923,7 +960,7 @@ error:
   return TCL_ERROR;
 }
 
-static int devSymObjCmd(
+static int SQLITE_TCLAPI devSymObjCmd(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -943,9 +980,53 @@ static int devSymObjCmd(
 }
 
 /*
+** tclcmd: sqlite3_crash_on_write N
+*/
+static int SQLITE_TCLAPI writeCrashObjCmd(
+  void * clientData,
+  Tcl_Interp *interp,
+  int objc,
+  Tcl_Obj *CONST objv[]
+){
+  void devsym_crash_on_write(int);
+  int nWrite = 0;
+
+  if( objc!=2 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "NWRITE");
+    return TCL_ERROR;
+  }
+  if( Tcl_GetIntFromObj(interp, objv[1], &nWrite) ){
+    return TCL_ERROR;
+  }
+
+  devsym_crash_on_write(nWrite);
+  return TCL_OK;
+}
+
+/*
+** tclcmd: unregister_devsim
+*/
+static int SQLITE_TCLAPI dsUnregisterObjCmd(
+  void * clientData,
+  Tcl_Interp *interp,
+  int objc,
+  Tcl_Obj *CONST objv[]
+){
+  void devsym_unregister(void);
+
+  if( objc!=1 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "");
+    return TCL_ERROR;
+  }
+
+  devsym_unregister();
+  return TCL_OK;
+}
+
+/*
 ** tclcmd: register_jt_vfs ?-default? PARENT-VFS
 */
-static int jtObjCmd(
+static int SQLITE_TCLAPI jtObjCmd(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -983,7 +1064,7 @@ static int jtObjCmd(
 /*
 ** tclcmd: unregister_jt_vfs
 */
-static int jtUnregisterObjCmd(
+static int SQLITE_TCLAPI jtUnregisterObjCmd(
   void * clientData,
   Tcl_Interp *interp,
   int objc,
@@ -1009,7 +1090,10 @@ int Sqlitetest6_Init(Tcl_Interp *interp){
 #ifndef SQLITE_OMIT_DISKIO
   Tcl_CreateObjCommand(interp, "sqlite3_crash_enable", crashEnableCmd, 0, 0);
   Tcl_CreateObjCommand(interp, "sqlite3_crashparams", crashParamsObjCmd, 0, 0);
+  Tcl_CreateObjCommand(interp, "sqlite3_crash_now", crashNowCmd, 0, 0);
   Tcl_CreateObjCommand(interp, "sqlite3_simulate_device", devSymObjCmd, 0, 0);
+  Tcl_CreateObjCommand(interp, "sqlite3_crash_on_write", writeCrashObjCmd,0,0);
+  Tcl_CreateObjCommand(interp, "unregister_devsim", dsUnregisterObjCmd, 0, 0);
   Tcl_CreateObjCommand(interp, "register_jt_vfs", jtObjCmd, 0, 0);
   Tcl_CreateObjCommand(interp, "unregister_jt_vfs", jtUnregisterObjCmd, 0, 0);
 #endif

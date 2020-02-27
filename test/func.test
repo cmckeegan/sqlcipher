@@ -14,6 +14,7 @@
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
+set testprefix func
 
 # Create a table to work with.
 #
@@ -312,8 +313,11 @@ ifcapable floatingpoint {
     execsql {SELECT round(9999999999999.55,1);}
   } {9999999999999.6}
   do_test func-4.38 {
-    execsql {SELECT round(9999999999999.555,2);}
+    execsql {SELECT round(9999999999999.556,2);}
   } {9999999999999.56}
+  do_execsql_test func-4.39 {
+    SELECT round(1e500), round(-1e500);
+  } {Inf -Inf}
 }
 
 # Test the upper() and lower() functions
@@ -506,6 +510,17 @@ if {$encoding=="UTF-16le"} {
     execsql {SELECT hex(replace('aabcdefg','a','aaa'))}
   } {616161616161626364656667}
 }
+do_execsql_test func-9.14 {
+  WITH RECURSIVE c(x) AS (
+     VALUES(1)
+     UNION ALL
+     SELECT x+1 FROM c WHERE x<1040
+  )
+  SELECT 
+    count(*),
+    sum(length(replace(printf('abc%.*cxyz',x,'m'),'m','nnnn'))-(6+x*4))
+  FROM c;
+} {1040 0}
   
 # Use the "sqlite_register_test_function" TCL command which is part of
 # the text fixture in order to verify correct operation of some of
@@ -681,6 +696,32 @@ do_test func-13.7 {
   }
   lappend res [sqlite3_finalize $STMT]
 } {{0 0} {1 0} SQLITE_OK}
+
+# Test that auxiliary data is discarded when a statement is reset.
+do_execsql_test 13.8.1 {
+  SELECT test_auxdata('constant') FROM t4;
+} {0 1}
+do_execsql_test 13.8.2 {
+  SELECT test_auxdata('constant') FROM t4;
+} {0 1}
+db cache flush
+do_execsql_test 13.8.3 {
+  SELECT test_auxdata('constant') FROM t4;
+} {0 1}
+set V "one"
+do_execsql_test 13.8.4 {
+  SELECT test_auxdata($V), $V FROM t4;
+} {0 one 1 one}
+set V "two"
+do_execsql_test 13.8.5 {
+  SELECT test_auxdata($V), $V FROM t4;
+} {0 two 1 two}
+db cache flush
+set V "three"
+do_execsql_test 13.8.6 {
+  SELECT test_auxdata($V), $V FROM t4;
+} {0 three 1 three}
+
 
 # Make sure that a function with a very long name is rejected
 do_test func-14.1 {
@@ -1167,6 +1208,18 @@ do_test func-24.12 {
                           WHEN 'program' THEN null ELSE t1 END) FROM tbl1
   }
 } {,is,free,software}
+# Tests to verify ticket http://www.sqlite.org/src/tktview/55746f9e65f8587c0
+do_test func-24.13 {
+  execsql {
+    SELECT typeof(group_concat(x)) FROM (SELECT '' AS x);
+  }
+} {text}
+do_test func-24.14 {
+  execsql {
+    SELECT typeof(group_concat(x,''))
+      FROM (SELECT '' AS x UNION ALL SELECT '');
+  }
+} {text}
 
 
 # Use the test_isolation function to make sure that type conversions
@@ -1273,11 +1326,15 @@ do_test func-29.3 {
   sqlite3_db_status db CACHE_MISS 1
   db eval {SELECT typeof(+x) FROM t29 ORDER BY id}
 } {integer null real blob text}
-do_test func-29.4 {
-  set x [lindex [sqlite3_db_status db CACHE_MISS 1] 1]
-  if {$x>100} {set x many}
-  set x
-} {many}
+if {[permutation] != "mmap"} {
+  ifcapable !direct_read {
+    do_test func-29.4 {
+      set x [lindex [sqlite3_db_status db CACHE_MISS 1] 1]
+      if {$x>100} {set x many}
+      set x
+    } {many}
+  }
+}
 do_test func-29.5 {
   db close
   sqlite3 db test.db
@@ -1289,6 +1346,118 @@ do_test func-29.6 {
   if {$x<5} {set x 1}
   set x
 } {1}
-  
+
+# The OP_Column opcode has an optimization that avoids loading content
+# for fields with content-length=0 when the content offset is on an overflow
+# page.  Make sure the optimization works.
+#
+do_execsql_test func-29.10 {
+  CREATE TABLE t29b(a,b,c,d,e,f,g,h,i);
+  INSERT INTO t29b 
+   VALUES(1, hex(randomblob(2000)), null, 0, 1, '', zeroblob(0),'x',x'01');
+  SELECT typeof(c), typeof(d), typeof(e), typeof(f),
+         typeof(g), typeof(h), typeof(i) FROM t29b;
+} {null integer integer text blob text blob}
+do_execsql_test func-29.11 {
+  SELECT length(f), length(g), length(h), length(i) FROM t29b;
+} {0 0 1 1}
+do_execsql_test func-29.12 {
+  SELECT quote(f), quote(g), quote(h), quote(i) FROM t29b;
+} {'' X'' 'x' X'01'}
+
+# EVIDENCE-OF: R-29701-50711 The unicode(X) function returns the numeric
+# unicode code point corresponding to the first character of the string
+# X.
+#
+# EVIDENCE-OF: R-55469-62130 The char(X1,X2,...,XN) function returns a
+# string composed of characters having the unicode code point values of
+# integers X1 through XN, respectively.
+#
+do_execsql_test func-30.1 {SELECT unicode('$');} 36
+do_execsql_test func-30.2 [subst {SELECT unicode('\u00A2');}] 162
+do_execsql_test func-30.3 [subst {SELECT unicode('\u20AC');}] 8364
+do_execsql_test func-30.4 {SELECT char(36,162,8364);} [subst {$\u00A2\u20AC}]
+
+for {set i 1} {$i<0xd800} {incr i 13} {
+  do_execsql_test func-30.5.$i {SELECT unicode(char($i))} $i
+}
+for {set i 57344} {$i<=0xfffd} {incr i 17} {
+  if {$i==0xfeff} continue
+  do_execsql_test func-30.5.$i {SELECT unicode(char($i))} $i
+}
+for {set i 65536} {$i<=0x10ffff} {incr i 139} {
+  do_execsql_test func-30.5.$i {SELECT unicode(char($i))} $i
+}
+
+# Test char().
+#
+do_execsql_test func-31.1 { 
+  SELECT char(), length(char()), typeof(char()) 
+} {{} 0 text}
+
+# sqlite3_value_frombind()
+#
+do_execsql_test func-32.100 {
+  SELECT test_frombind(1,2,3,4);
+} {0}
+do_execsql_test func-32.110 {
+  SELECT test_frombind(1,2,?,4);
+} {4}
+do_execsql_test func-32.120 {
+  SELECT test_frombind(1,(?),4,?+7);
+} {2}
+do_execsql_test func-32.130 {
+  DROP TABLE IF EXISTS t1;
+  CREATE TABLE t1(a,b,c,e,f);
+  INSERT INTO t1 VALUES(1,2.5,'xyz',x'e0c1b2a3',null);
+  SELECT test_frombind(a,b,c,e,f,$xyz) FROM t1;
+} {32}
+do_execsql_test func-32.140 {
+  SELECT test_frombind(a,b,c,e,f,$xyz+f) FROM t1;
+} {0}
+do_execsql_test func-32.150 {
+  SELECT test_frombind(x.a,y.b,x.c,:123,y.e,x.f,$xyz+y.f) FROM t1 x, t1 y;
+} {8}
+
+# 2019-08-15
+# Direct-only functions.
+#
+proc testdirectonly {x} {return [expr {$x*2}]}
+do_test func-33.1 {
+  db func testdirectonly -directonly testdirectonly
+  db eval {SELECT testdirectonly(15)}
+} {30}
+do_catchsql_test func-33.2 {
+  CREATE VIEW v33(y) AS SELECT testdirectonly(15);
+  SELECT * FROM v33;
+} {1 {testdirectonly() prohibited in triggers and views}}
+do_execsql_test func-33.3 {
+  SELECT * FROM (SELECT testdirectonly(15)) AS v33;
+} {30}
+do_execsql_test func-33.4 {
+  WITH c(x) AS (SELECT testdirectonly(15))
+  SELECT * FROM c;
+} {30}
+do_catchsql_test func-33.5 {
+  WITH c(x) AS (SELECT * FROM v33)
+  SELECT * FROM c;
+} {1 {testdirectonly() prohibited in triggers and views}}
+do_execsql_test func-33.10 {
+  CREATE TABLE t33a(a,b);
+  CREATE TABLE t33b(x,y);
+  CREATE TRIGGER r1 AFTER INSERT ON t33a BEGIN
+    INSERT INTO t33b(x,y) VALUES(testdirectonly(new.a),new.b);
+  END;
+} {}
+do_catchsql_test func-33.11 {
+  INSERT INTO t33a VALUES(1,2);
+} {1 {testdirectonly() prohibited in triggers and views}}
+do_execsql_test func-33.20 {
+  ALTER TABLE t33a RENAME COLUMN a TO aaa;
+  SELECT sql FROM sqlite_master WHERE name='r1';
+} {{CREATE TRIGGER r1 AFTER INSERT ON t33a BEGIN
+    INSERT INTO t33b(x,y) VALUES(testdirectonly(new.aaa),new.b);
+  END}}
+
 
 finish_test

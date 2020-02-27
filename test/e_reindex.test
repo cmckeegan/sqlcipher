@@ -26,7 +26,7 @@ do_execsql_test e_reindex-0.0 {
   CREATE INDEX i2 ON t1(b, a);
 } {}
 
-# EVIDENCE-OF: R-51477-38549 -- syntax diagram reindex-stmt
+#  -- syntax diagram reindex-stmt
 #
 do_reindex_tests e_reindex-0.1 {
   1   "REINDEX"           {}
@@ -44,22 +44,28 @@ do_reindex_tests e_reindex-0.1 {
 #    Test this by corrupting some database indexes, running REINDEX, and
 #    observing that the corruption is gone.
 #
+sqlite3_db_config db DEFENSIVE 0
 do_execsql_test e_reindex-1.1 {
   INSERT INTO t1 VALUES(1, 2);
   INSERT INTO t1 VALUES(3, 4);
   INSERT INTO t1 VALUES(5, 6);
+
+  CREATE TABLE saved(a,b,c,d,e);
+  INSERT INTO saved SELECT * FROM sqlite_master WHERE type = 'index';
   PRAGMA writable_schema = 1;
-  UPDATE sqlite_master SET sql = '-- ' || sql WHERE type = 'index';
+  DELETE FROM sqlite_master WHERE type = 'index';
 } {}
 
 db close
 sqlite3 db test.db
+sqlite3_db_config db DEFENSIVE 0
 do_execsql_test e_reindex-1.2 {
   DELETE FROM t1 WHERE a = 3;
   INSERT INTO t1 VALUES(7, 8);
   INSERT INTO t1 VALUES(9, 10);
   PRAGMA writable_schema = 1;
-  UPDATE sqlite_master SET sql = substr(sql, 4) WHERE type = 'index';
+  INSERT INTO sqlite_master SELECT * FROM saved;
+  DROP TABLE saved;
 } {}
 
 db close
@@ -67,10 +73,10 @@ sqlite3 db test.db
 do_execsql_test e_reindex-1.3 {
   PRAGMA integrity_check;
 } [list \
-  {rowid 4 missing from index i2} \
-  {rowid 4 missing from index i1} \
-  {rowid 5 missing from index i2} \
-  {rowid 5 missing from index i1} \
+  {row 3 missing from index i2} \
+  {row 3 missing from index i1} \
+  {row 4 missing from index i2} \
+  {row 4 missing from index i1} \
   {wrong # of entries in index i2} \
   {wrong # of entries in index i1}
 ]
@@ -98,7 +104,7 @@ proc sort_by_length {lhs rhs} {
 array set V {one 1 two 2 three 3 four 4 five 5 six 6 seven 7 eight 8}
 proc sort_by_value {lhs rhs} {
   global V
-  set res [expr {$V($lhs) - $V(rhs)}]
+  set res [expr {$V($lhs) - $V($rhs)}]
   if {$res!=0} {return $res}
   return [string compare $lhs $rhs]
 }
@@ -261,10 +267,9 @@ test_index 5.40  t2     collB   value
 test_index 5.41  aux.t1 collA   length
 test_index 5.42  aux.t1 collB   value
 
-# EVIDENCE-OF: R-15639-02023 If no database-name is specified and there
-# exists both a table or index and a collation sequence of the specified
-# name, SQLite interprets this as a request to rebuild the indices that
-# use the named collation sequence.
+# EVIDENCE-OF: R-35892-30289 For a command of the form "REINDEX name", a
+# match against collation-name takes precedence over a match against
+# index-name or table-name.
 #
 set_collations value length
 do_execsql_test e_reindex-2.6.0 {

@@ -13,6 +13,10 @@
 ** This is the C-language interface definition for the "intarray" or
 ** integer array virtual table for SQLite.
 **
+** This virtual table is used for internal testing of SQLite only.  It is
+** not recommended for use in production.  For a similar virtual table that
+** is production-ready, see the "carray" virtual table over in ext/misc.
+**
 ** The intarray virtual table is designed to facilitate using an
 ** array of integers as the right-hand side of an IN operator.  So
 ** instead of doing a prepared statement like this:
@@ -72,9 +76,21 @@
 ** virtual table is dropped.  Since the virtual tables are created in the
 ** TEMP database, they are automatically dropped when the database connection
 ** closes so the application does not normally need to take any special
-** action to free the intarray objects.
+** action to free the intarray objects.  Because of the way virtual tables
+** work and the (somewhat goofy) way that the intarray virtual table is
+** implemented, it is not allowed to invoke sqlite3_intarray_create(D,N,P)
+** more than once with the same D and N values.
 */
 #include "sqlite3.h"
+#ifndef SQLITE_INTARRAY_H
+#define SQLITE_INTARRAY_H
+
+/*
+** Make sure we can call this stuff from C++.
+*/
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
 ** An sqlite3_intarray is an abstract type to stores an instance of
@@ -93,7 +109,7 @@ typedef struct sqlite3_intarray sqlite3_intarray;
 ** explicitly by the application, the virtual table will be dropped implicitly
 ** by the system when the database connection is closed.
 */
-int sqlite3_intarray_create(
+SQLITE_API int sqlite3_intarray_create(
   sqlite3 *db,
   const char *zName,
   sqlite3_intarray **ppReturn
@@ -106,9 +122,14 @@ int sqlite3_intarray_create(
 ** any query against the corresponding virtual table.  If the integer
 ** array does change or is deallocated undefined behavior will result.
 */
-int sqlite3_intarray_bind(
+SQLITE_API int sqlite3_intarray_bind(
   sqlite3_intarray *pIntArray,   /* The intarray object to bind to */
   int nElements,                 /* Number of elements in the intarray */
   sqlite3_int64 *aElements,      /* Content of the intarray */
   void (*xFree)(void*)           /* How to dispose of the intarray when done */
 );
+
+#ifdef __cplusplus
+}  /* End of the 'extern "C"' block */
+#endif
+#endif /* SQLITE_INTARRAY_H */

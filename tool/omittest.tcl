@@ -1,6 +1,3 @@
-
-set rcsid {$Id: omittest.tcl,v 1.8 2008/10/13 15:35:09 drh Exp $}
-
 # Documentation for this script. This may be output to stderr
 # if the script is invoked incorrectly.
 set ::USAGE_MESSAGE {
@@ -53,8 +50,6 @@ proc run_quick_test {dir omit_symbol_list} {
   if {$::tcl_platform(platform)=="windows"} {
     append opts "OPTS += -DSQLITE_OS_WIN=1\n"
     set target "testfixture.exe"
-  } elseif {$::tcl_platform(platform)=="os2"} {
-    append opts "OPTS += -DSQLITE_OS_OS2=1\n"
   } else {
     append opts "OPTS += -DSQLITE_OS_UNIX=1\n"
   }
@@ -93,7 +88,7 @@ proc run_quick_test {dir omit_symbol_list} {
   # of trying to build the sqlite shell. The sqlite shell won't build 
   # with some of the OMIT options (i.e OMIT_COMPLETE).
   set sqlite3_dummy $dir/sqlite3
-  if {$::tcl_platform(platform)=="windows" || $::tcl_platform(platform)=="os2"} {
+  if {$::tcl_platform(platform)=="windows"} {
     append sqlite3_dummy ".exe"
   }
   if {![file exists $sqlite3_dummy]} {
@@ -127,8 +122,8 @@ proc run_quick_test {dir omit_symbol_list} {
 #
 proc process_options {argv} {
   set ::MAKEBIN make                        ;# Default value
-  if {$::tcl_platform(platform)=="windows" || $::tcl_platform(platform)=="os2"} {
-    set ::MAKEFILE ./Makefile               ;# Default value on Windows and OS2
+  if {$::tcl_platform(platform)=="windows"} {
+    set ::MAKEFILE ./Makefile               ;# Default value on Windows
   } else {
     set ::MAKEFILE ./Makefile.linux-gcc     ;# Default value
   }
@@ -136,24 +131,35 @@ proc process_options {argv} {
   set ::TARGET testfixture                  ;# Default thing to build
 
   for {set i 0} {$i < [llength $argv]} {incr i} {
-    switch -- [lindex $argv $i] {
-      -makefile {
+    switch -regexp -- [lindex $argv $i] {
+      -{1,2}makefile {
         incr i
         set ::MAKEFILE [lindex $argv $i]
       }
   
-      -nmake {
+      -{1,2}nmake {
         set ::MAKEBIN nmake
         set ::MAKEFILE ./Makefile.msc
       }
 
-      -target {
+      -{1,2}target {
         incr i
         set ::TARGET [lindex $argv $i]
       }
 
-      -skip_run {
+      -{1,2}skip_run {
         set ::SKIP_RUN 1
+      }
+
+      -{1,2}help {
+        puts $::USAGE_MESSAGE
+        exit
+      }
+
+      -.* {
+        puts stderr "Unknown option: [lindex $argv i]"
+        puts stderr $::USAGE_MESSAGE
+        exit 1
       }
 
       default {
@@ -186,20 +192,23 @@ proc main {argv} {
     SQLITE_OMIT_BETWEEN_OPTIMIZATION \
     SQLITE_OMIT_BLOB_LITERAL \
     SQLITE_OMIT_BTREECOUNT \
-    SQLITE_OMIT_BUILTIN_TEST \
     SQLITE_OMIT_CAST \
     SQLITE_OMIT_CHECK \
     SQLITE_OMIT_COMPILEOPTION_DIAGS \
     SQLITE_OMIT_COMPLETE \
     SQLITE_OMIT_COMPOUND_SELECT \
+    SQLITE_OMIT_CONFLICT_CLAUSE \
+    SQLITE_OMIT_CTE \
     SQLITE_OMIT_DATETIME_FUNCS \
     SQLITE_OMIT_DECLTYPE \
     SQLITE_OMIT_DEPRECATED \
+    SQLITE_OMIT_DISKIO \
     SQLITE_OMIT_EXPLAIN \
     SQLITE_OMIT_FLAG_PRAGMAS \
     SQLITE_OMIT_FLOATING_POINT \
     SQLITE_OMIT_FOREIGN_KEY \
     SQLITE_OMIT_GET_TABLE \
+    SQLITE_OMIT_HEX_INTEGER \
     SQLITE_OMIT_INCRBLOB \
     SQLITE_OMIT_INTEGRITY_CHECK \
     SQLITE_OMIT_LIKE_OPTIMIZATION \
@@ -207,27 +216,34 @@ proc main {argv} {
     SQLITE_OMIT_LOCALTIME \
     SQLITE_OMIT_LOOKASIDE \
     SQLITE_OMIT_MEMORYDB \
+    SQLITE_OMIT_MEMORY_ALLOCATION \
     SQLITE_OMIT_OR_OPTIMIZATION \
     SQLITE_OMIT_PAGER_PRAGMAS \
+    SQLITE_OMIT_PARSER_TRACE \
+    SQLITE_OMIT_POPEN \
     SQLITE_OMIT_PRAGMA \
     SQLITE_OMIT_PROGRESS_CALLBACK \
     SQLITE_OMIT_QUICKBALANCE \
+    SQLITE_OMIT_RANDOMNESS \
     SQLITE_OMIT_REINDEX \
     SQLITE_OMIT_SCHEMA_PRAGMAS \
     SQLITE_OMIT_SCHEMA_VERSION_PRAGMAS \
     SQLITE_OMIT_SHARED_CACHE \
+    SQLITE_OMIT_SHUTDOWN_DIRECTORIES \
     SQLITE_OMIT_SUBQUERY \
     SQLITE_OMIT_TCL_VARIABLE \
     SQLITE_OMIT_TEMPDB \
+    SQLITE_OMIT_TEST_CONTROL \
     SQLITE_OMIT_TRACE \
     SQLITE_OMIT_TRIGGER \
     SQLITE_OMIT_TRUNCATE_OPTIMIZATION \
-    SQLITE_OMIT_UNIQUE_ENFORCEMENT \
+    SQLITE_OMIT_UPSERT \
     SQLITE_OMIT_UTF16 \
     SQLITE_OMIT_VACUUM \
     SQLITE_OMIT_VIEW \
     SQLITE_OMIT_VIRTUALTABLE \
     SQLITE_OMIT_WAL \
+    SQLITE_OMIT_WINDOWFUNC \
     SQLITE_OMIT_WSD \
     SQLITE_OMIT_XFER_OPT \
   ]

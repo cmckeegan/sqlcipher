@@ -398,11 +398,82 @@ ifcapable compound {
   } {1 2 3 4 5 6 7 8 9}
   do_test insert-10.2 {
     catchsql {
-      INSERT INTO t10 VALUES(11,12,13), (14,15);
+      INSERT INTO t10 VALUES(11,12,13), (14,15), (16,17,28);
     }
   } {1 {all VALUES must have the same number of terms}}
 }
 
+# Need for the OP_SoftNull opcode
+#
+do_execsql_test insert-11.1 {
+  CREATE TABLE t11a AS SELECT '123456789' AS x;
+  CREATE TABLE t11b (a INTEGER PRIMARY KEY, b, c);
+  INSERT INTO t11b SELECT x, x, x FROM t11a;
+  SELECT quote(a), quote(b), quote(c) FROM t11b;
+} {123456789 '123456789' '123456789'}
+
+
+# More columns of input than there are columns in the table.
+# Ticket http://www.sqlite.org/src/info/e9654505cfda9361
+#
+do_execsql_test insert-12.1 {
+  CREATE TABLE t12a(a,b,c,d,e,f,g);
+  INSERT INTO t12a VALUES(101,102,103,104,105,106,107);
+  CREATE TABLE t12b(x);
+  INSERT INTO t12b(x,rowid,x,x,x,x,x) SELECT * FROM t12a;
+  SELECT rowid, x FROM t12b;
+} {102 101}
+do_execsql_test insert-12.2 {
+  CREATE TABLE tab1( value INTEGER);
+  INSERT INTO tab1 (value, _rowid_) values( 11, 1);
+  INSERT INTO tab1 (value, _rowid_) SELECT 22,999;
+  SELECT * FROM tab1;
+} {11 22}
+do_execsql_test insert-12.3 {
+  CREATE TABLE t12c(a, b DEFAULT 'xyzzy', c);
+  INSERT INTO t12c(a, rowid, c) SELECT 'one', 999, 'two';
+  SELECT * FROM t12c;
+} {one xyzzy two}
+
+# 2018-06-11.  From OSSFuzz.  A column cache malfunction in
+# the constraint checking on an index of expressions causes
+# an assertion fault in a REPLACE.  Ticket
+# https://www.sqlite.org/src/info/c2432ef9089ee73b
+#
+do_execsql_test insert-13.1 {
+  DROP TABLE IF EXISTS t13;
+  CREATE TABLE t13(a INTEGER PRIMARY KEY,b UNIQUE);
+  CREATE INDEX t13x1 ON t13(-b=b);
+  INSERT INTO t13 VALUES(1,5),(6,2);
+  REPLACE INTO t13 SELECT b,0 FROM t13;
+  SELECT * FROM t13 ORDER BY +b;
+} {2 0 6 2 1 5}
+
+# 2019-01-17.  From the chromium fuzzer.
+#
+do_execsql_test insert-14.1 {
+  DROP TABLE IF EXISTS t14;
+  CREATE TABLE t14(x INTEGER PRIMARY KEY);
+  INSERT INTO t14 VALUES(CASE WHEN 1 THEN null END);
+  SELECT x FROM t14;
+} {1}
+
 integrity_check insert-99.0
+
+# 2019-08-12.
+#
+do_execsql_test insert-15.1 {
+  DROP TABLE IF EXISTS t1;
+  DROP TABLE IF EXISTS t2;
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  CREATE INDEX i1 ON t1(b);
+  CREATE TABLE t2(a, b);
+  INSERT INTO t2 VALUES(4, randomblob(31000));
+  INSERT INTO t2 VALUES(4, randomblob(32000));
+  INSERT INTO t2 VALUES(4, randomblob(33000));
+  REPLACE INTO t1 SELECT a, b FROM t2;
+  SELECT a, length(b) FROM t1;
+} {4 33000}
+
 
 finish_test

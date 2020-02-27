@@ -12,8 +12,16 @@
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
+
+# If SQLITE_CURDIR is not defined, omit this file.
+ifcapable !curdir {
+  finish_test
+  return
+}
+
 source $testdir/malloc_common.tcl
 
+forcedelete bak.db
 unset -nocomplain defaultVfs
 set defaultVfs [file_control_vfsname db]
 db close
@@ -354,7 +362,7 @@ foreach file [glob -nocomplain quota-test-A*] {
 do_test quota-4.4.1 {
   set ::quota {}
   sqlite3_quota_set $::quotagroup 10000 quota_callback
-  file delete -force ./quota-test-A1.db ./quota-test-A2.db
+  forcedelete ./quota-test-A1.db ./quota-test-A2.db
   sqlite3 db ./quota-test-A1.db
   db eval {
      CREATE TABLE t1(x);
@@ -519,4 +527,6 @@ do_faultsim_test quota-5.6 -prep {
 }
 
 catch { sqlite3_quota_shutdown }
+catch { db close }
+forcedelete test.db
 finish_test
